@@ -1,0 +1,412 @@
+<!DOCTYPE html> 
+<html lang="en"> 
+<head> 
+    <meta charset="UTF-8"> <!-- Sets the character encoding to UTF-8 to support all standard characters and symbols -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"> <!-- Ensures the webpage scales correctly on mobile devices -->
+    <title>DIDSS - TapHouse Dashboard</title> <!-- The text that appears on the browser tab -->
+    
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap" rel="stylesheet">
+    
+    <!--custom CSS: Links to the personal stylesheet -->
+    <link rel="stylesheet" href="../static/css/main.css">
+</head>
+<body> <!--The main container for all visible content on the webpage -->
+    
+    <div class="wrap"> <!--custom container to hold everything and apply margins (defined in main.css) -->
+        
+        <!-- Header / Navbar: Uses Bootstrap classes to create a responsive, dark-themed top navigation bar -->
+        <header class="navbar navbar-expand-lg navbar-dark bg-taphouse mb-4 p-3 rounded">
+            <div class="container-fluid"> <!-- A Bootstrap container that takes up the full width of its parent -->
+                
+                <!-- The brand logo and name on the left side of the navbar -->
+                <a class="navbar-brand fw-bold" href="#">
+                    <img src="../static/images/TapHouseLogo.png" alt="TapHouse Logo" class="navbar-logo"> DIDSS TapHouse
+                </a>
+                
+                <!-- The 'hamburger' menu button -->
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                
+                <!-- The collapsible container  -->
+                <div class="collapse navbar-collapse" id="navbarNav">
+                    <ul class="navbar-nav ms-auto"> <!-- unordered list acting as the nav menu; 'ms-auto' pushes it to the right -->
+                        
+                        <!-- Individual list items containing navigation links with JavaScript 'onclick' events to switch views -->
+                        <li class="nav-item">
+                            <a class="nav-link active" href="#" onclick="showView('dashboard')">Dashboard</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#" onclick="showView('inventory')">Inventory Master</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#" onclick="showView('management')">Data Management</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="#" onclick="showView('scenario')">Scenario Evaluation</a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </header>
+
+        <main> 
+            
+            <!-- VIEW 1: Dashboard View  -->
+            <div id="dashboard-view">
+                <h2 class="mb-4">Beverage Inventory Dashboard</h2> <!-- Header tag with a Bootstrap class for bottom margin (mb-4) -->
+                
+                <!-- KPI Cards Section: A Bootstrap row used to place elements side-by-side on larger screens -->
+                <div class="row mb-4">
+                    <!-- Column class: takes up 3 out of 12 columns on medium screens, and 6 out of 12 on small screens -->
+                    <div class="col-md-3 col-sm-6 mb-3">
+                        <div class="card kpi-card shadow-sm text-center p-3 h-100"> <!-- A styled container for a metric -->
+                            <h5 class="text-muted">Service Level</h5> <!-- Subheading with grey text -->
+                            <h2 class="fw-bold">96%</h2> <!-- The actual metric value, styled bold -->
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-sm-6 mb-3">
+                        <div class="card kpi-card shadow-sm text-center p-3 h-100">
+                            <h5 class="text-muted">Stockout Events (30d)</h5>
+                            <h2 class="fw-bold">2</h2>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-sm-6 mb-3">
+                        <div class="card kpi-card shadow-sm text-center p-3 h-100">
+                            <h5 class="text-muted">Avg Inventory Value</h5>
+                            <h2 class="fw-bold">R 45,000</h2>
+                        </div>
+                    </div>
+                    <div class="col-md-3 col-sm-6 mb-3">
+                        <div class="card kpi-card shadow-sm text-center p-3 h-100">
+                            <h5 class="text-muted">Emergency Orders (30d)</h5>
+                            <h2 class="fw-bold">1</h2>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tables and Charts Section -->
+                <div class="row mb-4">
+                    <!-- Table Column: Takes up 7 out of 12 columns on large screens -->
+                    <div class="col-lg-7 mb-4">
+                        <div class="card shadow-sm h-100">
+                            <div class="card-header bg-white fw-bold">
+                                Products Nearing Reorder Point
+                            </div>
+                            <div class="card-body overflow-auto"> <!-- Allows scrolling if the table gets too wide -->
+                                <!-- The HTML table element -->
+                                <table class="table table-hover align-middle">
+                                    <thead> <!-- Table header section defining the column names -->
+                                        <tr>
+                                            <th>Product</th>
+                                            <th>Stock</th>
+                                            <th>ROP</th>
+                                            <th>Order Qty</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody> <!-- Table body section containing the actual data rows -->
+                                        <tr> <!-- A single table row -->
+                                            <!-- Individual table data cells (columns) -->
+                                            <td>Lager 500ml <img src="../static/images/lager_icon.png" alt="Lager" class="product-thumb"></td>
+                                            <td>48</td>
+                                            <td>60</td>
+                                            <td>144</td>
+                                            <td><span class="badge bg-warning text-dark">REORDER</span></td> <!-- A Bootstrap styled badge -->
+                                        </tr>
+                                        <tr>
+                                            <td>Cider 330ml <img src="../static/images/cider_icon.png" alt="Cider" class="product-thumb"></td>
+                                            <td>112</td>
+                                            <td>70</td>
+                                            <td>-</td>
+                                            <td><span class="badge bg-success">OK</span></td>
+                                        </tr>
+                                        <tr>
+                                            <td>Tonic Water <img src="../static/images/tonic_icon.png" alt="Tonic" class="product-thumb"></td>
+                                            <td>20</td>
+                                            <td>35</td>
+                                            <td>80</td>
+                                            <td><span class="badge bg-danger">URGENT</span></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Chart Column: Takes up 5 out of 12 columns on large screens -->
+                    <div class="col-lg-5 mb-4">
+                        <div class="card shadow-sm h-100">
+                            <div class="card-header bg-white fw-bold">
+                                7-Day Demand Forecast
+                            </div>
+                            <div class="card-body d-flex align-items-center justify-content-center">
+                                <!-- The canvas element where the Chart.js library will draw the graph -->
+                                <canvas id="demandChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Alerts Section -->
+                <div class="card shadow-sm mb-4 border-warning">
+                    <div class="card-header bg-warning text-dark fw-bold">
+                        Alerts
+                    </div>
+                    <div class="card-body">
+                        <!-- Different types of alert boxes colored dynamically using Bootstrap classes (danger=red, warning=yellow, info=blue) -->
+                        <div class="alert alert-danger" role="alert">
+                            <strong>Urgent:</strong> Tonic Water below safety stock - recommended order: 80 units (supplier lead time 4 days).
+                        </div>
+                        <div class="alert alert-warning" role="alert">
+                            <strong>Warning:</strong> Lager 500ml projected to reach ROP before next scheduled delivery.
+                        </div>
+                        <div class="alert alert-info" role="alert">
+                            <strong>Info:</strong> Demand forecast elevated: home match this Saturday (+38% vs. baseline).
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW 2: Inventory Master List (Hidden by default using inline CSS 'display: none') -->
+            <div id="inventory-view" style="display: none;">
+                <h2 class="mb-4">Inventory Master List</h2>
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-white d-flex justify-content-between align-items-center fw-bold">
+                        <span>All Beverage Products</span>
+                        <button class="btn btn-sm btn-primary">+ Add Product</button> <!-- A small primary-colored button -->
+                    </div>
+                    <div class="card-body overflow-auto">
+                        <table class="table table-striped align-middle">
+                            <thead>
+                                <tr>
+                                    <th>SKU ID</th>
+                                    <th>Product Name</th>
+                                    <th>Category</th>
+                                    <th>Current Stock</th>
+                                    <th>Unit Cost (R)</th>
+                                    <th>Supplier</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Additional table rows for the full inventory -->
+                                <tr>
+                                    <td>BEV-001</td>
+                                    <td>Lager 500ml <img src="../static/images/lager_icon.png" alt="Lager" class="product-thumb"></td>
+                                    <td>Beer</td>
+                                    <td>48</td>
+                                    <td>15.50</td>
+                                    <td>SAB</td>
+                                    <td><button class="btn btn-sm btn-outline-secondary">Edit</button></td>
+                                </tr>
+                                <tr>
+                                    <td>BEV-002</td>
+                                    <td>Cider 330ml <img src="../static/images/cider_icon.png" alt="Cider" class="product-thumb"></td>
+                                    <td>Cider</td>
+                                    <td>112</td>
+                                    <td>18.00</td>
+                                    <td>Distell</td>
+                                    <td><button class="btn btn-sm btn-outline-secondary">Edit</button></td>
+                                </tr>
+                                <tr>
+                                    <td>BEV-003</td>
+                                    <td>House Red Wine <img src="../static/images/wine_icon.png" alt="Wine" class="product-thumb"></td>
+                                    <td>Wine</td>
+                                    <td>24</td>
+                                    <td>65.00</td>
+                                    <td>Cape Wines</td>
+                                    <td><button class="btn btn-sm btn-outline-secondary">Edit</button></td>
+                                </tr>
+                                <tr>
+                                    <td>BEV-004</td>
+                                    <td>Tonic Water <img src="../static/images/tonic_icon.png" alt="Tonic" class="product-thumb"></td>
+                                    <td>Mixer</td>
+                                    <td>20</td>
+                                    <td>8.50</td>
+                                    <td>Beverage Co</td>
+                                    <td><button class="btn btn-sm btn-outline-secondary">Edit</button></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW 3: Data Management View (Hidden by default) -->
+            <div id="management-view" style="display: none;">
+                <h2 class="mb-4">Data Management</h2>
+                <div class="row">
+                    <!-- Manual POS Entry Form Container -->
+                    <div class="col-md-6 mb-4">
+                        <div class="card shadow-sm h-100">
+                            <div class="card-header bg-white fw-bold">Manual POS Sales Entry</div>
+                            <div class="card-body">
+                                <!-- HTML form. 'onsubmit' temporarily prevents page reload and shows an alert for this static mockup -->
+                                <form onsubmit="event.preventDefault(); alert('Sales data logged! (Demo)');">
+                                    <div class="mb-3">
+                                        <label class="form-label">Date</label>
+                                        <input type="date" class="form-control" required> <!-- HTML5 date picker input -->
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Product</label>
+                                        <select class="form-select" required> <!-- Dropdown menu selection -->
+                                            <option value="">Select a product...</option>
+                                            <option>Lager 500ml</option>
+                                            <option>Cider 330ml</option>
+                                            <option>House Red Wine</option>
+                                            <option>Tonic Water</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Quantity Sold</label>
+                                        <input type="number" class="form-control" required min="1"> <!-- Number input requiring a positive integer -->
+                                    </div>
+                                    <button type="submit" class="btn btn-primary w-100">Log Sales</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Supplier Updates & CSV Upload Container -->
+                    <div class="col-md-6 mb-4">
+                        <div class="card shadow-sm mb-4">
+                            <div class="card-header bg-white fw-bold">Update Supplier Lead Time</div>
+                            <div class="card-body">
+                                <form onsubmit="event.preventDefault(); alert('Supplier updated! (Demo)');">
+                                    <div class="mb-3">
+                                        <label class="form-label">Supplier Name</label>
+                                        <input type="text" class="form-control" placeholder="e.g., SAB" required> <!-- Standard text input field -->
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">New Lead Time (Days)</label>
+                                        <input type="number" class="form-control" required min="1">
+                                    </div>
+                                    <button type="submit" class="btn btn-outline-primary w-100">Update Supplier</button>
+                                </form>
+                            </div>
+                        </div>
+                        
+                        <div class="card shadow-sm">
+                            <div class="card-header bg-white fw-bold">Upload Historical POS Data (CSV)</div>
+                            <div class="card-body">
+                                <form onsubmit="event.preventDefault(); alert('CSV Uploaded! (Demo)');">
+                                    <div class="mb-3">
+                                        <!-- File input field restricted specifically to .csv files -->
+                                        <input class="form-control" type="file" id="formFile" accept=".csv" required> 
+                                    </div>
+                                    <button type="submit" class="btn btn-dark w-100">Upload Data</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW 4: Scenario Evaluation View (Hidden by default) -->
+            <div id="scenario-view" style="display: none;">
+                <h2 class="mb-4">Scenario Evaluation</h2>
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <p class="subhead mb-4">Adjust the parameters below to evaluate different inventory policies under varying supply and demand conditions.</p>
+                        
+                        <form id="scenario-form" onsubmit="event.preventDefault(); alert('Scenario simulated successfully! (Demo)');">
+                            <div class="mb-3">
+                                <label for="demandVar" class="form-label">Demand Variability (%)</label>
+                                <input type="number" class="form-control" id="demandVar" placeholder="e.g., 20" required min="0" max="100">
+                                <div class="form-text">Expected fluctuation in baseline demand.</div> <!-- Helper text for the input field -->
+                            </div>
+                            <div class="mb-3">
+                                <label for="leadTime" class="form-label">Supplier Lead Time (Days)</label>
+                                <input type="number" class="form-control" id="leadTime" placeholder="e.g., 4" required min="1">
+                            </div>
+                            <div class="mb-3">
+                                <label for="serviceLevel" class="form-label">Target Service Level (%)</label>
+                                <input type="number" class="form-control" id="serviceLevel" placeholder="e.g., 95" required min="50" max="99">
+                            </div>
+                            <button type="submit" class="btn primary-cta w-100">Run Simulation</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Bootstrap JS: Required for interactive components like the collapsible mobile navbar to function -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Chart.js: External library script required to render the demand forecast graph -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <script>
+        // Custom JavaScript logic to handle navigating between the 4 different "pages" (views)
+        function showView(viewId) {
+            // Find all the view container elements by their IDs
+            const dashboard = document.getElementById('dashboard-view');
+            const inventory = document.getElementById('inventory-view');
+            const management = document.getElementById('management-view');
+            const scenario = document.getElementById('scenario-view');
+            
+            // Find all the navigation links so we can update their highlighted state
+            const navLinks = document.querySelectorAll('.nav-link');
+            navLinks.forEach(link => link.classList.remove('active')); // Remove 'active' highlight from all links
+
+            // Hide all views first by setting their CSS display property to 'none'
+            dashboard.style.display = 'none';
+            inventory.style.display = 'none';
+            management.style.display = 'none';
+            scenario.style.display = 'none';
+
+            // Show the specific view the user clicked on, and add the 'active' highlight to the corresponding navbar link
+            if (viewId === 'dashboard') {
+                dashboard.style.display = 'block';
+                navLinks[0].classList.add('active');
+            } else if (viewId === 'inventory') {
+                inventory.style.display = 'block';
+                navLinks[1].classList.add('active');
+            } else if (viewId === 'management') {
+                management.style.display = 'block';
+                navLinks[2].classList.add('active');
+            } else if (viewId === 'scenario') {
+                scenario.style.display = 'block';
+                navLinks[3].classList.add('active');
+            }
+        }
+
+        // JavaScript logic to initialize and draw the Chart.js line graph
+        // Gets the <canvas> element where the chart will be drawn
+        const ctx = document.getElementById('demandChart').getContext('2d');
+        
+        // Creates the new chart instance
+        const demandChart = new Chart(ctx, {
+            type: 'line', // Specifies the type of chart (line graph)
+            data: {
+                labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], // The X-axis labels
+                datasets: [{
+                    label: 'Projected Demand', // The label for the data series
+                    data: [120, 110, 130, 150, 280, 350, 200], // The actual data points for the Y-axis
+                    borderColor: '#007bff', // Line color (Bootstrap blue)
+                    backgroundColor: 'rgba(0, 123, 255, 0.2)', // Area fill color under the line
+                    borderWidth: 2, // Thickness of the line
+                    fill: true, // Fills the area under the line with the backgroundColor
+                    tension: 0.4 // Curves the line slightly instead of using rigid straight angles
+                }]
+            },
+            options: {
+                responsive: true, // Ensures the chart resizes automatically based on the screen width
+                plugins: {
+                    legend: { display: false } // Hides the dataset label legend to save space
+                },
+                scales: {
+                    y: { beginAtZero: true } // Ensures the Y-axis starts at 0 instead of the lowest data point
+                }
+            }
+        });
+    </script>
+</body>
+</html>

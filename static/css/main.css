@@ -1,0 +1,117 @@
+/* Sets the default styling and background color for the entire webpage */
+body {
+    background-color: #FFFBF3; 
+    margin: 0; /* Removes default browser spacing around the edges */
+    font-family: 'Inter', sans-serif; /* Uses the Inter font loaded from Google, fallz back to standard sans-serif if it fails */
+}
+
+/* class to hide specific elements on mobile screens */
+.hide-mobile {
+    display: none; /* Makes the element completely invisible and takes up no space */
+}
+
+/* A custom container class to add padding/margins around the main content blocks */
+.wrap {
+    margin: 2em; /* Adds a uniform 2em (relative size) margin on all four sides */
+}
+
+/* Styles all Level 2 headings (like "Beverage Inventory Dashboard") */
+h2 {
+    font-weight: 700; /* Makes the text bold (700 is standard bold weight) */
+}
+
+/* Custom styling for paragraph tags that act as subheadings */
+p.subhead {
+    font-size: 1.2rem; /* Makes the text 20% larger than the default body text */
+    line-height: 1.5; /* Adds spacing between lines of text for better readability */
+    color: #6c757d; /* A grey color to contrast with main black text */
+}
+
+/* Styles the main Call-to-Action (CTA) buttons like the "Run Simulation" button */
+.primary-cta, button.primary-cta {
+    background: #FFA800; /* Sets the button background to a orange */
+    padding: 1em; /* Adds padding inside the button to make it taller and wider */
+    width: 100%; /* Forces the button to span the full width of its parent container */
+    box-sizing: border-box; /* Ensures padding doesn't increase the total 100% width */
+    display: block; /* Forces the button to behave like a block-level element (taking up its own line) */
+    text-align: center; /* Centers the text inside the button */
+    text-decoration: none; /* Removes underlines if the class is applied to a hyperlink */
+    font-weight: bold; /* Makes the button text stand out */
+    font-size: 1.1rem; /* Slightly increases the button text size */
+    color: black; /* Sets the button text color */
+    border-radius: .3em; /* Slightly rounds the corners of the button */
+    margin-top: 1.5em; /* Pushes the button down from elements above it */
+    border: none; /* Removes default browser borders from the button */
+    transition: background 0.3s; /* Smoothly animates the background color change over 0.3 seconds when hovered */
+}
+
+/* Hover state for the CTA button - defines what happens when the user's mouse is over it */
+.primary-cta:hover {
+    background: #e59700; /* Changes the background to a slightly darker orange */
+    color: black; /* Keeps the text color black */
+}
+
+/* Styles the Key Performance Indicator (KPI) boxes at the top of the dashboard */
+.kpi-card {
+    border-left: 4px solid #83a347; /* Adds a thick green accent line to the left side of the card */
+    transition: transform 0.2s; /* Animates the 'transform' property over 0.2 seconds for a smooth hover effect */
+}
+
+/* Hover state for the KPI cards */
+.kpi-card:hover {
+    transform: translateY(-4px); /* Physically lifts the card 4 pixels upwards when the mouse hovers over it */
+}
+
+/* NEW IMAGE STYLES */
+
+/* Styles the TapHouse logo image in the top navigation bar */
+.navbar-logo {
+    height: 80px; /* Restricts the logo height to 80px so it fits well within the header */
+    margin-right: 10px; /* Adds space between the right side of the logo and the "DIDSS TapHouse" text */
+    vertical-align: middle; /* Aligns the image vertically with the text next to it */
+}
+
+/* Styles the small product icons inside the data tables */
+.product-thumb {
+    height: 30px; /* Forces the thumbnail to be exactly 30px tall */
+    width: 30px; /* Forces the thumbnail to be exactly 30px wide, creating a perfect square */
+    object-fit: cover; /* Ensures the image fills the 30x30 box without stretching or distorting */
+    border-radius: 4px; /* Slightly rounds the corners of the thumbnail images */
+    margin-left: 10px; /* Adds space between the product name text and the image */
+    vertical-align: middle; /* Aligns the thumbnail vertically with the text next to it */
+}
+
+/* Desktop Styles - Media queries that only apply when the screen width is large enough */
+
+/* Applies styling only when the screen is 798 pixels or wider (Tablets and Desktops) */
+@media (min-width: 798px) {
+    /* Utility class to hide specific elements on desktop screens */
+    .hide-desktop {
+        display: none;
+    }
+
+    /* Overrides the earlier .hide-mobile class, making the element visible again on larger screens */
+    .hide-mobile {
+        display: block;
+    }
+
+    /* Increases the margins around the main container to 4em on the left and right on larger screens */
+    .wrap {
+        margin: 0 4em;
+    }
+}
+
+/* Applies styling only when the screen is 1200 pixels or wider (Large Monitors) */
+@media (min-width: 1200px) {
+    .wrap {
+        margin: 0 auto; /* Horizontally centers the wrap container on the page */
+        margin-top: 2em; /* Pushes the container down 2em from the top */
+        padding: 0 2em; /* Adds 2em padding on the inside left and right */
+        max-width: 1700px; /* Prevents the content from stretching wider than 1700px, keeping it readable on ultra-wide screens */
+    }
+}
+
+/* Custom class applied to the <header> tag to overwrite Bootstrap's default dark color */
+.bg-taphouse {
+    background-color: #0c3a13 !important; /* Changes the header background style to dark green. '!important' forces this rule to override Bootstrap */
+}
