@@ -1,0 +1,13 @@
+# Secrets & environment variables (never commit .env or certificates!)
+.env
+*.pem
+
+# Python virtual environments & bytecode cache
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# OS / IDE artifacts
+.DS_Store
+.vscode/
