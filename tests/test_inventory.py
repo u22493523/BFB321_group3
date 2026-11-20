@@ -3,7 +3,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import unittest
-from models.inventory import (calculate_eoq, calculate_safety_stock, calculate_reorder_point,
+from models import (calculate_eoq, calculate_safety_stock, calculate_reorder_point,
                               z_from_service_level)
 
 
