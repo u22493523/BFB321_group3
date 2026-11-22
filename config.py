@@ -37,6 +37,10 @@ class Config:
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     LOG_FILE = os.path.join(BASE_DIR, "logs", "app.log")
 
+    # Session cookie for the manager login (auth.py)
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = "Lax"     # not sent with requests from other sites
+
     DEBUG = False
     TESTING = False
 

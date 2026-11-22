@@ -1,4 +1,4 @@
-"""API tests (Step 4): call every endpoint through Flask's test client and
+"""API tests (Steps 4 and 5): call every endpoint through Flask's test client and
 check the result in MySQL.
 
 They use a separate database (TEST_DB_NAME in .env, default
@@ -30,6 +30,7 @@ NEW_PRODUCT = {"sku": "BEV-013", "name": "Craft Stout 440ml", "category": "Beer"
                "unit_cost": 24.50, "current_stock": 30, "annual_demand": 1825, "order_cost": 120,
                "holding_cost": 4.90, "avg_daily_demand": 5, "std_dev_demand": 1.8}
 
+MANAGER = {"email": "manager@taphouse.co.za", "password": "TapHouse2026!"}   # seeded test account
 
 def setUpModule():
     """Create the empty test database once; skip everything if MySQL is down."""
@@ -47,8 +48,16 @@ class ApiTestCase(unittest.TestCase):
         with redirect_stdout(io.StringIO()):          # keep init_db's printout out of test output
             init_db.main(reset=True, database=TEST_DB)
         self.client = app.test_client()
+        self.login(self.client)          # writes need the manager signed in (Step 5)
 
-    # --- helpers -----------------------------------------------------------
+    # --- helpers
+    @staticmethod
+    def login(client):
+        res = client.post("/api/auth/login", json=MANAGER)
+        assert res.status_code == 200, res.get_json()
+        return res
+
+    # --- other helpers -----------------------------------------------------
     def sql_one(self, sql, params=()):
         """Read straight from MySQL to prove a change really persisted."""
         conn = connect(TEST_DB)
@@ -235,6 +244,43 @@ class TestSuppliersAndDashboard(ApiTestCase):
         self.assertLess(after["inventory_value"], before["inventory_value"])
         self.assertEqual(after["status_counts"]["URGENT"], before["status_counts"]["URGENT"] + 1)
         self.assertEqual(after["counts"]["sales"], before["counts"]["sales"] + 1)
+
+
+class TestLogin(ApiTestCase):
+    """Step 5: only the signed-in manager can change data."""
+    def test_dashboard_page_redirects_to_login(self):
+        guest = app.test_client()
+        res = guest.get("/")
+        self.assertEqual(res.status_code, 302)
+        self.assertIn("/login", res.headers["Location"])
+        self.assertEqual(guest.get("/login").status_code, 200)
+
+    def test_wrong_password_is_refused(self):
+        guest = app.test_client()
+        self.assertEqual(guest.post("/login", data={"email": MANAGER["email"], "password": "nope"}).status_code, 401)
+        self.assertEqual(guest.post("/api/auth/login", json={**MANAGER, "password": "nope"}).status_code, 401)
+
+    def test_form_login_opens_dashboard_and_logout_closes_it(self):
+        guest = app.test_client()
+        res = guest.post("/login?next=/", data=MANAGER)
+        self.assertEqual(res.status_code, 302)
+        self.assertEqual(guest.get("/").status_code, 200)
+        guest.post("/logout")
+        self.assertEqual(guest.get("/").status_code, 302)
+
+    def test_writes_need_login_but_reads_do_not(self):
+        guest = app.test_client()
+        self.assertEqual(guest.get("/api/products").status_code, 200)
+        res = guest.post("/api/sales", json={"product_id": 3, "quantity_sold": 1})
+        self.assertEqual(res.status_code, 401)
+        self.assertEqual(res.get_json()["error"]["code"], 401)
+        self.assertEqual(guest.patch("/api/suppliers/1", json={"lead_time_days": 5}).status_code, 401)
+        self.assertEqual(self.sql_one("SELECT COUNT(*) AS n FROM sales_orders")["n"], 36)
+
+    def test_login_does_not_redirect_to_other_sites(self):
+        guest = app.test_client()
+        res = guest.post("/login?next=//evil.example.com", data=MANAGER)
+        self.assertEqual(res.headers["Location"], "/")
 
 
 if __name__ == "__main__":

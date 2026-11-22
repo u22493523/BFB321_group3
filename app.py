@@ -3,6 +3,7 @@ from flask import Flask, render_template, request
 import db
 import models
 from api import api
+from auth import auth, current_user, login_required
 from config import get_config
 from errors import configure_logging, register_error_handlers
 
@@ -13,12 +14,14 @@ db.init_app(app)
 configure_logging(app)
 register_error_handlers(app)
 app.register_blueprint(api)            # all /api/... JSON endpoints live in api.py
+app.register_blueprint(auth)           # /login, /logout and /api/auth/... (auth.py)
 
 
 # ---------------------------------------------------------------------
 # Main Dashboard & Integrated Views (Step 3 Live MySQL Connection)
 # ---------------------------------------------------------------------
 @app.route("/")
+@login_required
 def index():
     search = request.args.get("q", "").strip()
     category = request.args.get("category", "").strip() or None
@@ -34,6 +37,7 @@ def index():
         reorder_products=reorder_products,
         products=products,
         suppliers=suppliers,
+        user=current_user(),
     )
 
 

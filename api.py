@@ -4,6 +4,9 @@ Each route does three things only: read the request, call one function in
 models.py, and return JSON. All SQL and business rules live in models.py,
 and all errors are turned into JSON by errors.py.
 
+Reading (GET) is open; creating or changing data (POST, PATCH) needs the
+manager to be signed in (POST /api/auth/login), otherwise 401.
+
 Response shape
     success, one record   {"data": {...}}
     success, a list       {"data": [...], "meta": {"page": 1, "size": 10, "total": 12, "pages": 2}}
@@ -14,6 +17,7 @@ from datetime import date
 from flask import Blueprint, current_app, jsonify, request, url_for
 
 import models
+from auth import api_login_required
 from errors import ValidationError
 
 api = Blueprint("api", __name__, url_prefix="/api")
@@ -129,6 +133,7 @@ def list_products():
 
 
 @api.post("/products")
+@api_login_required
 def create_product():
     """POST /api/products: add a product; the model sets its safety stock and ROP."""
     product = models.create_product(_body(), current_app.config["SERVICE_LEVEL"])
@@ -142,6 +147,7 @@ def get_product(product_id):
 
 
 @api.patch("/products/<int:product_id>")
+@api_login_required
 def update_product(product_id):
     """PATCH /api/products/<id>: change stock, costs, demand data or the reorder point."""
     return jsonify(data=models.update_product(product_id, _body(), current_app.config["SERVICE_LEVEL"]))
@@ -157,6 +163,7 @@ def product_recommendation(product_id):
 
 
 @api.post("/products/<int:product_id>/recalculate")
+@api_login_required
 def recalculate_product(product_id):
     """POST /api/products/<id>/recalculate?service_level=: save the model's SS and ROP."""
     errors = {}
@@ -176,6 +183,7 @@ def list_suppliers():
 
 
 @api.post("/suppliers")
+@api_login_required
 def create_supplier():
     """POST /api/suppliers: add a supplier."""
     supplier = models.create_supplier(_body())
@@ -189,6 +197,7 @@ def get_supplier(supplier_id):
 
 
 @api.patch("/suppliers/<int:supplier_id>")
+@api_login_required
 def update_supplier(supplier_id):
     """PATCH /api/suppliers/<id>: e.g. a new lead time; its products are recalculated."""
     return jsonify(data=models.update_supplier(supplier_id, _body(), current_app.config["SERVICE_LEVEL"]))
@@ -212,6 +221,7 @@ def list_sales():
 
 
 @api.post("/sales")
+@api_login_required
 def create_sale():
     """POST /api/sales: log a sale; stock goes down in the same transaction."""
     result = models.create_sale(_body())
