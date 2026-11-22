@@ -25,7 +25,7 @@ Stack: HTML/CSS/Bootstrap frontend · Flask backend · MySQL (local or Aiven) ·
 | Step 2: supply chain model and unit tests | Nehar Lalla | *Add Step 2 Python supply chain logic and tests*; *Step 2: move supply chain formulas into supply_chain.py* |
 | Step 3: 3NF schema, seed data, PyMySQL connection, init script, live dashboard | Thejas Nirghin | *Step 3 (1/3)* to *Step 3 (3/3)* |
 | Step 3 fixes: model-calculated safety stock and reorder points, live alerts, README | Nehar Lalla | *Step 3 fix: …* |
-| Step 4: REST API, validation, error handling, logging, config, API tests | Nehar Lalla | *Step 4 (1/4)* to *Step 4 (4/4)* |
+| Step 4: REST API blueprint, validation, error handling, logging, config, API tests | Nehar Lalla | *Step 4 (1/4)* to *Step 4 (4/4)* |
 
 ## Project structure
 
@@ -33,10 +33,13 @@ Follows the class sample project ([bfb321/FLASK](https://github.com/bfb321/FLASK
 
 ```
 BFB321_group3/
-├── app.py              routes: reads the request, calls models, renders templates
-├── models.py           SQL queries and business rules (no HTML, no routes)
+├── app.py              creates the app, loads config, registers the API blueprint; page routes
+├── api.py              Blueprint with every /api/... JSON endpoint (Step 4)
+├── models.py           SQL queries, validation and business rules (no HTML, no routes)
 ├── supply_chain.py     Step 2 model: EOQ, safety stock, reorder point (no database code)
-├── db.py               MySQL connection from .env, one connection per request, query helpers
+├── db.py               MySQL connection from .env, one connection per request, rollback helpers
+├── errors.py           error handlers for every status code, and logging setup
+├── config.py           development, testing and production settings
 ├── init_db.py          creates the tables, loads the sample data, runs the model
 ├── schema.sql          CREATE TABLE statements
 ├── seed.sql            sample data (4 suppliers, 12 products, 36 sales, 1 manager)
@@ -44,12 +47,15 @@ BFB321_group3/
 ├── .env.example        template for your .env file (no real passwords)
 ├── templates/          index.html (dashboard)
 ├── static/             css/main.css, images/
-└── tests/              test_inventory.py (unit tests), VScode_Testing.py (quick manual run)
+├── tests/              test_inventory.py (model), test_api.py (API), VScode_Testing.py
+└── logs/               app.log, created when the app runs (not committed)
 ```
 
 ```
-Browser → app.py (route) → models.py (SQL + rules) → db.py (connection) → MySQL
-                                   ↘ supply_chain.py (formulas)
+Browser / fetch ─▶ app.py ─▶ api.py (Blueprint, /api) ─▶ models.py (SQL + rules) ─▶ db.py ─▶ MySQL
+                                                              │
+                                                              └─▶ supply_chain.py (formulas)
+errors.py turns every failure into a clean JSON error and writes it to logs/app.log
 ```
 
 ## Database
@@ -230,6 +236,145 @@ Open <http://127.0.0.1:5000>. Stop the server with `Ctrl+C`.
 
 ```bash
 python -m unittest discover -s tests -p "test_*.py"
+```
+
+`test_inventory.py` checks the supply chain formulas against hand calculations. `test_api.py`
+calls every endpoint and checks the result in MySQL. It uses a separate database
+(`TEST_DB_NAME`, default `taphouse_didss_test`) that it creates, wipes and rebuilds itself, so your
+real data is never touched; your MySQL user needs permission to create it. If MySQL is not
+running, the API tests are skipped and the formula tests still run.
+
+## REST API (Step 4)
+
+All endpoints are in `api.py`, a Flask **Blueprint** mounted at `/api`. Each route only reads the
+request, calls one function in `models.py` and returns JSON; all SQL and rules stay in
+`models.py`. Open <http://127.0.0.1:5000/api> while the app is running for a live list of every
+endpoint.
+
+### Endpoints
+
+| # | Method | Path | Purpose | Success |
+|---|---|---|---|---|
+| 1 | GET | `/api` | List every endpoint | 200 |
+| 2 | GET | `/api/products` | List products, paged and filtered (see query parameters) | 200 |
+| 3 | POST | `/api/products` | Add a product; the model sets its safety stock and reorder point | 201 |
+| 4 | GET | `/api/products/<id>` | One product with status and recommended order quantity | 200 |
+| 5 | PATCH | `/api/products/<id>` | Update stock, costs, demand data or the reorder point | 200 |
+| 6 | GET | `/api/products/<id>/recommendation` | The model's safety stock, reorder point and EOQ (not saved) | 200 |
+| 7 | POST | `/api/products/<id>/recalculate` | Save the model's safety stock and reorder point | 200 |
+| 8 | GET | `/api/suppliers` | List suppliers with their product count (`?q=` searches names) | 200 |
+| 9 | POST | `/api/suppliers` | Add a supplier | 201 |
+| 10 | GET | `/api/suppliers/<id>` | One supplier | 200 |
+| 11 | PATCH | `/api/suppliers/<id>` | Update a supplier; a new lead time recalculates its products | 200 |
+| 12 | GET | `/api/sales` | List sales, paged and filtered | 200 |
+| 13 | POST | `/api/sales` | Log a sale and reduce stock in one transaction | 201 |
+| 14 | GET | `/api/sales/<id>` | One sale | 200 |
+| 15 | GET | `/api/dashboard` | KPI cards, stock status counts, demand by weekday and alerts | 200 |
+
+`POST` responses return `201 Created` with a `Location` header pointing at the new record.
+
+### Query parameters
+
+| Endpoint | Parameter | Rule |
+|---|---|---|
+| `/api/products`, `/api/sales` | `page`, `size` | Whole numbers; `page` ≥ 1, `size` 1–100 (default 10) |
+| `/api/products` | `q` | Searches name and SKU |
+| | `category` | Exact category, e.g. `Wine` |
+| | `status` | `URGENT`, `REORDER` or `OK` |
+| | `supplier_id` | Products from one supplier |
+| | `sort` | `sku`, `-sku`, `name`, `-name`, `stock`, `-stock` or `status` (most urgent first) |
+| `/api/sales` | `product_id` | Sales of one product |
+| | `from`, `to` | Dates `YYYY-MM-DD`; `to` must not be before `from` |
+| `/recommendation`, `/recalculate` | `service_level` | 0.95 to 0.999 (default `SERVICE_LEVEL` in `.env`) |
+
+### Response shape
+
+Every response uses the same field names:
+
+```json
+// one record
+{"data": {"id": 1, "sku": "BEV-001", "name": "Lager 500ml", "current_stock": 48,
+          "safety_stock": 20, "reorder_point": 60, "status": "REORDER", "recommended_order_qty": 532, "...": "..."}}
+
+// a list
+{"data": [ ... ], "meta": {"page": 2, "size": 5, "total": 12, "pages": 3}}
+
+// an error
+{"error": {"code": 400, "message": "Some fields are invalid.",
+           "details": {"sku": "Use 3-20 capital letters, digits or dashes, e.g. BEV-013.",
+                       "unit_cost": "Cannot be negative."}}}
+```
+
+### Request bodies
+
+Send JSON (`Content-Type: application/json`). Normal HTML form posts are accepted too.
+
+| Endpoint | Required fields | Optional fields |
+|---|---|---|
+| `POST /api/products` | `sku` (3–20 capitals, digits or dashes), `name`, `category`, `supplier_id`, `unit_cost` | `current_stock`, `annual_demand`, `order_cost`, `holding_cost`, `avg_daily_demand`, `std_dev_demand`, `image_filename` |
+| `PATCH /api/products/<id>` | at least one field | any field above, plus `reorder_point` (manual override). `safety_stock` is calculated and cannot be set |
+| `POST /api/suppliers` | `name`, `lead_time_days` (1–365), `contact_email` | `std_dev_lead_time` |
+| `PATCH /api/suppliers/<id>` | at least one field | any field above |
+| `POST /api/sales` | `product_id`, `quantity_sold` (≥ 1) | `unit_price` (default: the product's latest selling price), `sale_date` (`YYYY-MM-DD`, not in the future; default now) |
+
+Example: log a sale of 4 bottles of House Red Wine.
+
+```bash
+curl -X POST http://127.0.0.1:5000/api/sales \
+     -H "Content-Type: application/json" \
+     -d '{"product_id": 3, "quantity_sold": 4, "sale_date": "2026-11-20"}'
+```
+
+```json
+{"data": {"sale":    {"id": 37, "product_id": 3, "quantity_sold": 4, "unit_price": 135.0, "...": "..."},
+          "product": {"id": 3, "current_stock": 20, "status": "REORDER", "...": "..."}}}
+```
+
+Example: change a supplier's lead time.
+
+```bash
+curl -X PATCH http://127.0.0.1:5000/api/suppliers/4 \
+     -H "Content-Type: application/json" -d '{"lead_time_days": 7}'
+```
+
+Tonic Water's reorder point (Beverage Co) rises from 36 to 55, because the model recalculates every
+product from that supplier.
+
+### Status codes and errors
+
+| Code | When |
+|---|---|
+| 200 | Read or update succeeded |
+| 201 | Record created |
+| 400 | Missing field, wrong type, out-of-range value, bad JSON or bad query parameter |
+| 404 | Record or URL not found |
+| 405 | Wrong method for the URL (e.g. `DELETE`) |
+| 409 | Duplicate SKU or supplier name, or a sale larger than the stock on hand |
+| 500 | Unexpected server error: a generic message only, never a stack trace |
+| 503 | MySQL not reachable |
+
+`errors.py` handles all of these in one place. Database writes that must happen together, such as
+saving a sale and reducing stock, run in one transaction (`db.transaction()`): if any step fails,
+everything is rolled back and nothing is half-saved.
+
+### Configuration and logging
+
+`config.py` has `DevelopmentConfig`, `TestingConfig` and `ProductionConfig`; `APP_ENV` in `.env`
+picks one. All database details come from `.env` (see `.env.example`).
+
+| Setting | Development | Testing | Production |
+|---|---|---|---|
+| Debug | on | off | off |
+| Database | `DB_NAME` | `TEST_DB_NAME` | `DB_NAME` |
+| Log level | `LOG_LEVEL` (INFO) | WARNING | `LOG_LEVEL` (WARNING) |
+| Log file | `logs/app.log` | console only | `logs/app.log` |
+
+Every request is logged with its method, path, status and time, and every error with its message;
+unexpected errors include the full traceback in the log (never in the response):
+
+```
+2026-11-22 10:24:17,005 INFO    taphouse: POST /api/sales 201 13ms
+2026-11-22 10:24:17,050 INFO    taphouse: POST /api/sales -> 409 Only 20 units of House Red Wine are in stock.
 ```
 
 ## Quick check

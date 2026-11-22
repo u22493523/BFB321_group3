@@ -39,9 +39,10 @@ def recalculate_inventory_policy(cur, service_level):
     return len(rows)
 
 
-def main(reset=False):
+def main(reset=False, database=None):
+    """Build the tables in `database` (default: DB_NAME from .env)."""
     try:
-        conn = connect()
+        conn = connect(database)
     except Exception as exc:
         print(f"Could not connect to MySQL: {exc}")
         print("Check the values in .env and ensure your MySQL server is running.")

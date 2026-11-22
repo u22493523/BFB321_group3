@@ -51,6 +51,7 @@ class TestingConfig(Config):
     TESTING = True
     DB_NAME = os.getenv("TEST_DB_NAME", "taphouse_didss_test")
     LOG_FILE = None
+    LOG_LEVEL = "WARNING"      # keep test output readable
 
 
 class ProductionConfig(Config):
