@@ -14,3 +14,10 @@ __pycache__/
 
 # Application logs
 logs/
+
+
+# Database backups contain real data (backup.py, Step 6)
+backups/
+
+# curl sign-in cookie from the README examples
+cookies.txt
