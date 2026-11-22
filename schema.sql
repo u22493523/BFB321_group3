@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS products (
     holding_cost DECIMAL(10,2) NOT NULL DEFAULT 0.00 CHECK (holding_cost >= 0),
     avg_daily_demand INT NOT NULL DEFAULT 0 CHECK (avg_daily_demand >= 0),
     std_dev_demand DECIMAL(6,2) NOT NULL DEFAULT 0.00 CHECK (std_dev_demand >= 0),
-    reorder_point INT NOT NULL DEFAULT 0 CHECK (reorder_point >= 0),
+    safety_stock INT NOT NULL DEFAULT 0 CHECK (safety_stock >= 0),   -- calculated by supply_chain.py
+    reorder_point INT NOT NULL DEFAULT 0 CHECK (reorder_point >= 0), -- calculated by supply_chain.py
     image_filename VARCHAR(120) DEFAULT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -72,5 +73,6 @@ CREATE TABLE IF NOT EXISTS users (
     last_name VARCHAR(100) NOT NULL,
     email VARCHAR(255) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );

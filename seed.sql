@@ -11,23 +11,25 @@ INSERT INTO suppliers (name, lead_time_days, std_dev_lead_time, contact_email) V
     ('Beverage Co', 4, 1.00, 'orders@beverageco.co.za');
 
 -- 2. Seed Beverage Products (12 TapHouse SKUs; BEV-001 to BEV-004 match UI mockup)
+--    safety_stock and reorder_point are not typed in here: init_db.py calculates
+--    them with the Step 2 model (supply_chain.py) from demand and lead-time data.
 INSERT INTO products (
     sku, name, category, supplier_id, current_stock, unit_cost,
     annual_demand, order_cost, holding_cost, avg_daily_demand,
-    std_dev_demand, reorder_point, image_filename
+    std_dev_demand, image_filename
 ) VALUES
-    ('BEV-001', 'Lager 500ml', 'Beer', 1, 48, 15.50, 3650, 120.00, 3.10, 10, 3.20, 60, 'lager_icon.png'),
-    ('BEV-002', 'Cider 330ml', 'Cider', 2, 112, 18.00, 6205, 110.00, 3.60, 17, 4.40, 70, 'cider_icon.png'),
-    ('BEV-003', 'House Red Wine', 'Wine', 3, 24, 65.00, 1095, 150.00, 13.00, 3, 1.00, 20, 'wine_icon.png'),
-    ('BEV-004', 'Tonic Water', 'Mixer', 4, 20, 8.50, 2190, 80.00, 1.70, 6, 1.60, 35, 'tonic_icon.png'),
-    ('BEV-005', 'Craft IPA 440ml', 'Beer', 1, 85, 22.00, 2920, 120.00, 4.40, 8, 2.80, 48, 'lager_icon.png'),
-    ('BEV-006', 'Draught Keg 30L', 'Beer', 1, 6, 850.00, 365, 200.00, 170.00, 1, 0.45, 6, 'lager_icon.png'),
-    ('BEV-007', 'Dry Lemon 200ml', 'Mixer', 4, 96, 7.80, 2555, 80.00, 1.56, 7, 2.10, 41, 'tonic_icon.png'),
-    ('BEV-008', 'Sauvignon Blanc 750ml', 'Wine', 3, 30, 72.00, 1460, 150.00, 14.40, 4, 1.50, 28, 'wine_icon.png'),
-    ('BEV-009', 'Apple Cider 500ml', 'Cider', 2, 64, 21.50, 3285, 110.00, 4.30, 9, 3.00, 38, 'cider_icon.png'),
-    ('BEV-010', 'Soda Water 200ml', 'Mixer', 4, 40, 7.20, 2920, 80.00, 1.44, 8, 2.40, 47, 'tonic_icon.png'),
-    ('BEV-011', 'Ginger Ale 200ml', 'Mixer', 4, 75, 8.00, 1825, 80.00, 1.60, 5, 1.75, 30, 'tonic_icon.png'),
-    ('BEV-012', 'Rosé Wine 750ml', 'Wine', 3, 18, 68.00, 1095, 150.00, 13.60, 3, 1.20, 21, 'wine_icon.png');
+    ('BEV-001', 'Lager 500ml', 'Beer', 1, 48, 15.50, 3650, 120.00, 3.10, 10, 3.20, 'lager_icon.png'),
+    ('BEV-002', 'Cider 330ml', 'Cider', 2, 112, 18.00, 6205, 110.00, 3.60, 17, 4.40, 'cider_icon.png'),
+    ('BEV-003', 'House Red Wine', 'Wine', 3, 24, 65.00, 1095, 150.00, 13.00, 3, 1.00, 'wine_icon.png'),
+    ('BEV-004', 'Tonic Water', 'Mixer', 4, 20, 8.50, 2190, 80.00, 1.70, 6, 1.60, 'tonic_icon.png'),
+    ('BEV-005', 'Craft IPA 440ml', 'Beer', 1, 85, 22.00, 2920, 120.00, 4.40, 8, 2.80, 'lager_icon.png'),
+    ('BEV-006', 'Draught Keg 30L', 'Beer', 1, 6, 850.00, 365, 200.00, 170.00, 1, 0.45, 'lager_icon.png'),
+    ('BEV-007', 'Dry Lemon 200ml', 'Mixer', 4, 96, 7.80, 2555, 80.00, 1.56, 7, 2.10, 'tonic_icon.png'),
+    ('BEV-008', 'Sauvignon Blanc 750ml', 'Wine', 3, 30, 72.00, 1460, 150.00, 14.40, 4, 1.50, 'wine_icon.png'),
+    ('BEV-009', 'Apple Cider 500ml', 'Cider', 2, 64, 21.50, 3285, 110.00, 4.30, 9, 3.00, 'cider_icon.png'),
+    ('BEV-010', 'Soda Water 200ml', 'Mixer', 4, 40, 7.20, 2920, 80.00, 1.44, 8, 2.40, 'tonic_icon.png'),
+    ('BEV-011', 'Ginger Ale 200ml', 'Mixer', 4, 75, 8.00, 1825, 80.00, 1.60, 5, 1.75, 'tonic_icon.png'),
+    ('BEV-012', 'Rosé Wine 750ml', 'Wine', 3, 18, 68.00, 1095, 150.00, 13.60, 3, 1.20, 'wine_icon.png');
 
 -- 3. Seed Historical POS Sales Orders (36 transactions across 30 days)
 INSERT INTO sales_orders (product_id, quantity_sold, unit_price, sale_date) VALUES

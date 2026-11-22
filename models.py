@@ -8,9 +8,14 @@ from supply_chain import calculate_eoq
 # =====================================================================
 # Products & Stock Status
 # =====================================================================
-def stock_status(current_stock, reorder_point):
-    """Return (label, Bootstrap badge class, needs_order) calculated from live stock."""
-    if current_stock == 0 or current_stock <= (reorder_point * 0.6):
+def stock_status(current_stock, safety_stock, reorder_point):
+    """Return (label, Bootstrap badge class, needs_order) calculated from live stock.
+
+    URGENT  stock at or below safety stock (the buffer is already being used)
+    REORDER stock at or below the reorder point
+    OK      otherwise
+    """
+    if current_stock <= safety_stock:
         return "URGENT", "bg-danger", True
     if current_stock <= reorder_point:
         return "REORDER", "bg-warning text-dark", True
@@ -20,7 +25,8 @@ def stock_status(current_stock, reorder_point):
 def _enrich_products(rows):
     """Attach live status badges and Step 2 EOQ recommended order quantities."""
     for row in rows:
-        status, badge, needs_order = stock_status(row["current_stock"], row["reorder_point"])
+        status, badge, needs_order = stock_status(
+            row["current_stock"], row["safety_stock"], row["reorder_point"])
         row["status"] = status
         row["badge"] = badge
         if needs_order and float(row["holding_cost"]) > 0 and row["annual_demand"] > 0:
@@ -42,7 +48,7 @@ PRODUCT_SELECT = """
            s.name AS supplier_name, s.lead_time_days, s.std_dev_lead_time,
            p.current_stock, p.unit_cost, p.annual_demand,
            p.order_cost, p.holding_cost, p.avg_daily_demand,
-           p.std_dev_demand, p.reorder_point, p.image_filename
+           p.std_dev_demand, p.safety_stock, p.reorder_point, p.image_filename
     FROM products p
     JOIN suppliers s ON s.id = p.supplier_id
 """
