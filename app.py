@@ -2,14 +2,17 @@ from flask import Flask, render_template, request
 
 import db
 import models
+from api import api
 from config import get_config
 from errors import configure_logging, register_error_handlers
 
 app = Flask(__name__)
 app.config.from_object(get_config())   # development / testing / production from APP_ENV
+app.json.sort_keys = False             # keep JSON fields in database order
 db.init_app(app)
 configure_logging(app)
 register_error_handlers(app)
+app.register_blueprint(api)            # all /api/... JSON endpoints live in api.py
 
 
 # ---------------------------------------------------------------------

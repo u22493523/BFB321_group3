@@ -37,7 +37,6 @@ class Config:
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     LOG_FILE = os.path.join(BASE_DIR, "logs", "app.log")
 
-    JSON_SORT_KEYS = False
     DEBUG = False
     TESTING = False
 
