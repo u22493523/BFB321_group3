@@ -32,6 +32,7 @@ class Config:
     # API list endpoints: ?page=1&size=10, never more than 100 rows at once
     DEFAULT_PAGE_SIZE = 10
     MAX_PAGE_SIZE = 100
+    MAX_CONTENT_LENGTH = 1 * 1024 * 1024   # CSV uploads: 1 MB at most (413 if larger)
 
     # Logging (set up in errors.py)
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

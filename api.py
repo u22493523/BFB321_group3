@@ -155,11 +155,17 @@ def update_product(product_id):
 
 @api.get("/products/<int:product_id>/recommendation")
 def product_recommendation(product_id):
-    """GET /api/products/<id>/recommendation?service_level=0.95: the Step 2 model's advice."""
+    """GET /api/products/<id>/recommendation?service_level=0.95: the Step 2 model's advice.
+
+    Scenario evaluation (Step 5): add ?demand_change=38 (a home rugby match, +38%
+    demand) and/or ?lead_time_days=7 (a late supplier) to see what the model would
+    advise. Nothing is saved; the saved values are returned alongside for comparison."""
     errors = {}
     level = _service_level(errors)
+    demand_change = _int_arg("demand_change", 0, minimum=-90, maximum=300, errors=errors)
+    lead_time = _int_arg("lead_time_days", None, minimum=1, maximum=365, errors=errors)
     _raise_if(errors)
-    return jsonify(data=models.product_recommendation(product_id, level))
+    return jsonify(data=models.product_recommendation(product_id, level, demand_change, lead_time))
 
 
 @api.post("/products/<int:product_id>/recalculate")
@@ -170,6 +176,13 @@ def recalculate_product(product_id):
     level = _service_level(errors)
     _raise_if(errors)
     return jsonify(data=models.recalculate_product(product_id, level))
+
+
+@api.post("/products/<int:product_id>/receive")
+@api_login_required
+def receive_stock(product_id):
+    """POST /api/products/<id>/receive {"quantity": 532}: a delivery arrived, add it to stock."""
+    return jsonify(data=models.receive_stock(product_id, _body()))
 
 
 # ---------------------------------------------------------------------
@@ -226,6 +239,26 @@ def create_sale():
     """POST /api/sales: log a sale; stock goes down in the same transaction."""
     result = models.create_sale(_body())
     return _created(result, "api.get_sale", sale_id=result["sale"]["id"])
+
+
+@api.post("/sales/import")
+@api_login_required
+def import_sales():
+    """POST /api/sales/import: upload the till's CSV (form field "file").
+    All rows are saved, or none are (every bad row is listed with a 400)."""
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        raise ValidationError({"file": "Choose a .csv file to upload."})
+    if not upload.filename.lower().endswith(".csv"):
+        raise ValidationError({"file": "Only .csv files can be imported."})
+    try:
+        text = upload.read().decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValidationError({"file": "Save the file as CSV UTF-8 and try again."})
+    result = models.import_sales(text)
+    response = jsonify(data=result)
+    response.status_code = 201
+    return response
 
 
 @api.get("/sales/<int:sale_id>")

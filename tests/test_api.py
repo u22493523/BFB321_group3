@@ -13,6 +13,7 @@ import os
 import sys
 import unittest
 from contextlib import redirect_stdout
+from datetime import date
 from decimal import Decimal
 from unittest import mock
 
@@ -31,6 +32,11 @@ NEW_PRODUCT = {"sku": "BEV-013", "name": "Craft Stout 440ml", "category": "Beer"
                "holding_cost": 4.90, "avg_daily_demand": 5, "std_dev_demand": 1.8}
 
 MANAGER = {"email": "manager@taphouse.co.za", "password": "TapHouse2026!"}   # seeded test account
+SALES_CSV = ("sale_date,sku,quantity_sold,unit_price\n"
+             "2026-11-20,BEV-003,4,135.00\n"
+             "2026-11-20,bev-004,5,\n"
+             "2026-11-21,BEV-003,2,135.00\n")
+
 
 def setUpModule():
     """Create the empty test database once; skip everything if MySQL is down."""
@@ -202,6 +208,8 @@ class TestSales(ApiTestCase):
         self.assertEqual(self.post("/api/sales", {"product_id": 3}).status_code, 400)
         self.assertEqual(self.post("/api/sales", {"product_id": 3, "quantity_sold": 0}).status_code, 400)
         self.assertEqual(self.post("/api/sales", {"product_id": 999, "quantity_sold": 1}).status_code, 400)
+        today = self.post("/api/sales", {"product_id": 3, "quantity_sold": 1, "sale_date": date.today().isoformat()})
+        self.assertEqual(today.status_code, 201)                    # today is allowed, even before midday
         future = self.post("/api/sales", {"product_id": 3, "quantity_sold": 1, "sale_date": "2099-01-01"})
         self.assertEqual(future.get_json()["error"]["details"]["sale_date"], "The date cannot be in the future.")
 
@@ -281,6 +289,51 @@ class TestLogin(ApiTestCase):
         guest = app.test_client()
         res = guest.post("/login?next=//evil.example.com", data=MANAGER)
         self.assertEqual(res.headers["Location"], "/")
+
+
+class TestReceiveAndImport(ApiTestCase):
+    """Step 5: the two new manager workflows."""
+    def upload(self, text, name="sales.csv"):
+        return self.client.post("/api/sales/import", data={"file": (io.BytesIO(text.encode()), name)},
+                                content_type="multipart/form-data")
+
+    def test_receiving_a_delivery_clears_the_reorder_status(self):
+        self.assertEqual(self.client.get("/api/products/1").get_json()["data"]["status"], "REORDER")
+        res = self.post("/api/products/1/receive", {"quantity": 532})             # EOQ for Lager
+        self.assertEqual(res.get_json()["data"]["current_stock"], 48 + 532)
+        self.assertEqual(res.get_json()["data"]["status"], "OK")
+        self.assertEqual(self.post("/api/products/1/receive", {"quantity": 0}).status_code, 400)
+        self.assertEqual(self.post("/api/products/999/receive", {"quantity": 5}).status_code, 404)
+
+    def test_csv_import_saves_every_row_and_reduces_stock(self):
+        res = self.upload(SALES_CSV)
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.get_json()["data"]["imported"], 3)
+        self.assertEqual(self.sql_one("SELECT current_stock FROM products WHERE id = 3")["current_stock"], 24 - 6)
+        self.assertEqual(self.sql_one("SELECT current_stock FROM products WHERE id = 4")["current_stock"], 20 - 5)
+        self.assertEqual(self.sql_one("SELECT COUNT(*) AS n FROM sales_orders")["n"], 39)
+
+    def test_csv_with_a_bad_row_saves_nothing(self):
+        bad = SALES_CSV + "2026-11-21,BEV-999,1,\n2026-13-40,BEV-003,1,\n2026-11-21,BEV-003,500,\n"
+        res = self.upload(bad)
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(set(res.get_json()["error"]["details"]), {"row 5", "row 6", "row 7"})
+        self.assertEqual(self.sql_one("SELECT COUNT(*) AS n FROM sales_orders")["n"], 36)
+        self.assertEqual(self.sql_one("SELECT current_stock FROM products WHERE id = 3")["current_stock"], 24)
+
+    def test_scenario_changes_the_advice_but_saves_nothing(self):
+        base = self.client.get("/api/products/1/recommendation").get_json()["data"]
+        match_day = self.client.get("/api/products/1/recommendation?demand_change=38&lead_time_days=7").get_json()["data"]
+        self.assertEqual(match_day["inputs"]["avg_daily_demand"], 14)              # 10 * 1.38 rounded up
+        self.assertEqual(match_day["scenario"]["lead_time_days"], 7)
+        self.assertGreater(match_day["reorder_point"], base["reorder_point"])
+        self.assertEqual(self.sql_one("SELECT reorder_point FROM products WHERE id = 1")["reorder_point"], 60)
+        self.assertEqual(self.client.get("/api/products/1/recommendation?demand_change=900").status_code, 400)
+
+    def test_csv_wrong_columns_and_wrong_file(self):
+        self.assertIn("file", self.upload("date,product\n2026-11-20,Lager\n").get_json()["error"]["details"])
+        self.assertEqual(self.upload(SALES_CSV, name="sales.xlsx").status_code, 400)
+        self.assertEqual(self.client.post("/api/sales/import").status_code, 400)
 
 
 if __name__ == "__main__":

@@ -266,9 +266,16 @@ def _to_decimal(value):
 def _to_date(value):
     """Accept 2026-11-21 or 2026-11-21T18:30:00; dates in the future are refused."""
     text = str(value).strip()
-    parsed = datetime.fromisoformat(text) if "T" in text or " " in text else \
-        datetime.combine(date.fromisoformat(text), datetime.min.time().replace(hour=12))
-    if parsed > datetime.now():
+    now = datetime.now()
+    if "T" in text or " " in text:
+        parsed = datetime.fromisoformat(text)
+    else:
+        # a date on its own is stored at midday (or "now" for today's sales logged before midday)
+        day = date.fromisoformat(text)
+        parsed = datetime.combine(day, datetime.min.time().replace(hour=12))
+        if day == now.date():
+            parsed = min(parsed, now)
+    if parsed > now:
         raise ValueError("future")
     return parsed
 
@@ -468,9 +475,18 @@ def update_product(product_id, data, service_level=DEFAULT_SERVICE_LEVEL):
     return to_json(get_product(product_id))
 
 
-def product_recommendation(product_id, service_level=DEFAULT_SERVICE_LEVEL):
-    """GET /api/products/<id>/recommendation: what the model advises, without saving."""
-    product = require_product(product_id)
+def product_recommendation(product_id, service_level=DEFAULT_SERVICE_LEVEL, demand_change=0,
+                           lead_time_days=None):
+    """GET /api/products/<id>/recommendation: what the model advises, without saving.
+    demand_change (percent) and lead_time_days let the manager test a scenario."""
+    product = dict(require_product(product_id))
+    if demand_change:
+        factor = 1 + demand_change / 100
+        product["avg_daily_demand"] = math.ceil(product["avg_daily_demand"] * factor)
+        product["std_dev_demand"] = Decimal(str(round(float(product["std_dev_demand"]) * factor, 2)))
+        product["annual_demand"] = math.ceil(product["annual_demand"] * factor)
+    if lead_time_days:
+        product["lead_time_days"] = lead_time_days
     model = _model_output(product, product, service_level)
     status, _badge, needs_order = stock_status(product["current_stock"], model["safety_stock"],
                                                model["reorder_point"])
@@ -489,6 +505,7 @@ def product_recommendation(product_id, service_level=DEFAULT_SERVICE_LEVEL):
             "holding_cost": float(product["holding_cost"]),
             "current_stock": product["current_stock"],
         },
+        "scenario": {"demand_change_pct": demand_change, "lead_time_days": product["lead_time_days"]},
         **model,
         "status": status,
         "recommended_order_qty": order_qty,
@@ -662,3 +679,95 @@ def dashboard_api():
                                       kpis["forecast_7day"])),
         "alerts": kpis["alerts"],
     }
+
+
+# =====================================================================
+# Step 5: receiving a delivery and importing a day's sales from CSV
+# =====================================================================
+RECEIVE_RULES = {"quantity": ("int", {"minimum": 1, "maximum": 100_000})}
+CSV_COLUMNS = ("sale_date", "sku", "quantity_sold")        # unit_price is optional
+MAX_IMPORT_ROWS = 500
+
+
+def receive_stock(product_id, data):
+    """POST /api/products/<id>/receive: a supplier delivery arrived, add it to stock.
+    Used by the "Receive order" button next to products that need reordering."""
+    require_product(product_id)
+    values = validate(data, RECEIVE_RULES, {"quantity"})
+    execute("UPDATE products SET current_stock = current_stock + %s WHERE id = %s",
+            (values["quantity"], product_id))
+    return to_json(get_product(product_id))
+
+
+def import_sales(csv_text):
+    """POST /api/sales/import: log many sales from the till's CSV export.
+
+    Expected header: sale_date,sku,quantity_sold[,unit_price]
+    Every row is checked first. If any row is wrong (bad date, unknown SKU,
+    more sold than in stock) nothing is saved and every problem is reported
+    by row number, so the manager can fix the file and upload it again.
+    """
+    import csv
+    import io
+
+    reader = csv.DictReader(io.StringIO(csv_text.lstrip("﻿")))   # ﻿: Excel's hidden BOM
+    header = [h.strip().lower() for h in (reader.fieldnames or [])]
+    missing = [c for c in CSV_COLUMNS if c not in header]
+    if missing:
+        raise ValidationError({"file": f"Missing column(s): {', '.join(missing)}. "
+                                       f"The first line must be: sale_date,sku,quantity_sold,unit_price"},
+                              "The CSV file has the wrong columns.")
+    reader.fieldnames = header
+
+    errors, rows = {}, []
+    for line_no, raw in enumerate(reader, start=2):              # line 1 is the header
+        if not any((v or "").strip() for v in raw.values()):
+            continue                                             # skip blank lines
+        if len(rows) >= MAX_IMPORT_ROWS:
+            errors["file"] = f"Upload at most {MAX_IMPORT_ROWS} rows at a time."
+            break
+        sku = (raw.get("sku") or "").strip().upper()
+        try:
+            values = validate({k: raw.get(k) for k in ("quantity_sold", "unit_price", "sale_date")
+                               if (raw.get(k) or "").strip()},
+                              SALE_RULES, {"quantity_sold", "sale_date"})
+        except ValidationError as exc:
+            errors[f"row {line_no}"] = "; ".join(f"{k}: {v}" for k, v in exc.details.items())
+            continue
+        rows.append((line_no, sku, values))
+    if not rows and not errors:
+        raise ValidationError({"file": "The file has a header but no sales."}, "The CSV file is empty.")
+
+    with transaction() as cur:
+        products = {}
+        for sku in sorted({sku for _, sku, _ in rows}):
+            cur.execute("SELECT id, sku, name, current_stock, unit_cost FROM products WHERE sku = %s FOR UPDATE",
+                        (sku,))
+            row = cur.fetchone()
+            if row:
+                products[sku] = {**row, "remaining": row["current_stock"]}
+        for line_no, sku, values in rows:
+            product = products.get(sku)
+            if product is None:
+                errors[f"row {line_no}"] = f"sku: {sku or '(blank)'} is not a product."
+                continue
+            if values["quantity_sold"] > product["remaining"]:
+                errors[f"row {line_no}"] = (f"quantity_sold: only {product['remaining']} units of "
+                                            f"{product['name']} left in stock.")
+                continue
+            product["remaining"] -= values["quantity_sold"]
+        if errors:
+            # nothing has been written yet; raising here also rolls back the row locks
+            raise ValidationError(dict(sorted(errors.items(), key=lambda e: (len(e[0]), e[0]))),
+                                  "Nothing was imported. Fix these rows and upload the file again.")
+        for _, sku, values in rows:
+            product = products[sku]
+            cur.execute("""INSERT INTO sales_orders (product_id, quantity_sold, unit_price, sale_date)
+                           VALUES (%s, %s, %s, %s)""",
+                        (product["id"], values["quantity_sold"],
+                         values.get("unit_price", product["unit_cost"]), values["sale_date"]))
+            cur.execute("UPDATE products SET current_stock = current_stock - %s WHERE id = %s",
+                        (values["quantity_sold"], product["id"]))
+    return {"imported": len(rows),
+            "products": [{"sku": p["sku"], "name": p["name"], "current_stock": p["remaining"]}
+                         for p in products.values()]}
