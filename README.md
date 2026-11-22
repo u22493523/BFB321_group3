@@ -28,6 +28,8 @@ Stack: HTML/CSS/Bootstrap frontend · Flask backend · MySQL (local or Aiven) ·
 | Step 4: REST API blueprint, validation, error handling, logging, config, API tests | Nehar Lalla | *Step 4 (1/4)* to *Step 4 (4/4)* |
 | Step 5: manager login, CSV import, receive orders, scenario evaluation, live dashboard (fetch) | Thejas Nirghin | *Step 5 (1/4)* to *Step 5 (4/4)* |
 | Step 6: migrations with rollback, backup and restore, health check, audit trail, production setup | Nehar Lalla | *Step 6 (1/4)* to *Step 6 (4/4)* |
+| Step 7: impact simulation (before/after KPIs and charts), scalability test and dashboard speed-up | Thejas Nirghin | *Step 7 (1/3)* to *Step 7 (3/3)* |
+| Part C report and Part B video | Nehar Lalla and Thejas Nirghin | (submitted on clickUP) |
 
 ## Project structure
 
@@ -46,6 +48,9 @@ BFB321_group3/
 ├── init_db.py          creates the tables, loads the sample data, runs the model
 ├── migrate.py          applies / rolls back database changes in migrations/ (Step 6)
 ├── backup.py           backs up and restores the database to backups/ (Step 6)
+├── simulation.py       one simulated year: manual ordering vs DIDSS, KPIs and charts (Step 7)
+├── scale_test.py       times the API with 1,000 and 5,000 products (Step 7)
+├── docs/impact/        Step 7 results: impact_kpis.png, impact_lager_stock.png, CSV files
 ├── migrations/         numbered .up.sql / .down.sql pairs, e.g. 002_stock_receipts
 ├── schema.sql          CREATE TABLE statements (full current structure for a new database)
 ├── seed.sql            sample data (4 suppliers, 12 products, 36 sales, 1 manager)
@@ -521,9 +526,10 @@ which ones this database has.
 |---|---|---|
 | `001_inventory_policy_columns` | Adds `products.safety_stock` and `users.updated_at` (databases built before the Step 3 fix) | Drops both columns |
 | `002_stock_receipts` | Adds the `stock_receipts` table: every delivery, who received it and when | Drops the table (stock levels are unchanged) |
+| `003_sales_date_index` | Adds an index on `sales_orders.sale_date` (Step 7: keeps the dashboard fast as sales grow) | Drops the index |
 
 ```bash
-python migrate.py status      # 2 applied, 0 pending
+python migrate.py status      # 3 applied, 0 pending
 python migrate.py up          # backs up, then applies anything pending, oldest first
 python migrate.py down        # backs up, then undoes the most recent migration
 python migrate.py baseline    # a database built by init_db.py already has them all: just record them
@@ -585,6 +591,106 @@ off the laptop (e.g. OneDrive): `backups/` is not committed to GitHub because it
 3. Deploy the code, then `python migrate.py up`.
 4. `GET /api/health` shows `"status": "ok"` and no pending migrations.
 5. Sign in, log one test sale, check the dashboard updates; if anything fails, follow the rollback plan.
+
+## Impact (Step 7)
+
+**These results are simulated, not measured in the bar.** `simulation.py` takes the 12 seeded
+TapHouse products (demand, its variation, costs and supplier lead times) and plays out one year
+(52 weeks) twice, with exactly the same customer demand and the same supplier delays. Only the
+ordering rule changes:
+
+| | Manual ordering (before) | DIDSS (after) |
+|---|---|---|
+| When stock is checked | Once a week (Monday stock count) | Every day (sales are logged in the app) |
+| When to order | Less than one week of average demand on hand or on order | Stock on hand + on order at or below the **reorder point** |
+| How much | Enough for two weeks of average demand | The **EOQ** from `supply_chain.py` |
+| Safety stock for busy days and late deliveries | None | Yes, at a 95% service level |
+
+In both, a product that runs out triggers an emergency order (one week of stock, next day, at
+three times the normal order cost) and customers who find it sold out buy something else.
+Demand follows the weekday pattern (Fridays and Saturdays busiest) and rises 38% on a home rugby
+Saturday every second week.
+
+```bash
+pip install matplotlib        # only needed for the charts
+python simulation.py          # writes docs/impact/; --seed 7 for another random year
+```
+
+### Before and after
+
+| KPI (one year, 12 products) | Manual (before) | DIDSS (after) | Change |
+|---|---|---|---|
+| Service level (share of demand served) | 97.7% | 100.0% | +2.3 points |
+| Stockout days (product-days) | 190 | 3 | −98% |
+| Units of demand lost | 712 | 12 | −98% |
+| Emergency orders | 166 | 0 | −100% |
+| Normal orders placed | 337 | 96 | −72% |
+| Ordering + emergency cost | R 98,110 | R 12,230 | −88% |
+| Holding cost | R 3,374 | R 12,314 | +265% |
+| **Total inventory cost** | **R 101,484** | **R 24,544** | **−76%** |
+| Average inventory value | R 16,914 | R 61,741 | +265% |
+
+![Four bar charts comparing manual ordering with DIDSS over one simulated year: stockout days fall from 190 to 3, emergency orders from 166 to 0 and total inventory cost from R 101,484 to R 24,544, while average inventory value rises from R 16,914 to R 61,741.](docs/impact/impact_kpis.png)
+
+*Figure 1. One simulated year with the same demand under both policies. DIDSS removes almost all
+stockouts and every emergency order and cuts total inventory cost by about three quarters, but it
+holds about 3.7 times as much stock on average.*
+
+![Line chart of Lager 500ml stock on hand over the first 16 weeks: under manual ordering stock repeatedly hits zero around rugby Saturdays; under DIDSS stock drops to the reorder point of 60 and is refilled with one large EOQ order before it runs out.](docs/impact/impact_lager_stock.png)
+
+*Figure 2. Lager 500ml, first 16 weeks. Manual ordering (orange) runs out several times, often
+just after rugby Saturdays (grey bars), because a weekly count cannot react mid-week. DIDSS (blue)
+reorders the day stock reaches the reorder point, so the safety stock covers the busy days.*
+
+**What this means for TapHouse.** The saving comes mainly from placing far fewer, larger orders
+and avoiding emergency orders, not from holding less stock. Holding more stock is the cost-optimal
+answer for the order and holding costs in the data (that is what the EOQ formula balances), but it
+ties up cash and cold-room space: Draught Keg 30L alone accounts for about R 15,500 of the average
+stock value, because its EOQ is 29 kegs at R 850 each. A sensitivity run in which no order covers
+more than 30 days of demand keeps the service level at 100% and still cuts total cost by 73%, with
+an average stock value of R 44,476 instead of R 61,741 (`docs/impact/impact_summary.csv`). That
+cap is the recommended next change if storage or cash is tight.
+
+**How reliable is this?** The same comparison with five other random years (seeds 1–5) gives a
+manual service level of 97.2–98.0% against 99.8–100% for DIDSS, 0–2 emergency orders against
+155–192, and a total cost of R 24,500–25,200 against R 97,500–107,700. The weak points are the
+assumptions: the manual rule is our model of a weekly stock count, not a measured TapHouse
+process, and the demand data is the seeded sample. With three months of real POS data uploaded
+through the CSV import, `simulation.py` can be re-run on TapHouse's own numbers.
+
+### Scalability
+
+TapHouse has 12 products today. `scale_test.py` builds a separate database with 1,000 and 5,000
+products (50 suppliers, 60 sales each, up to 300,036 sales) and times the busiest requests
+(median of 15 calls, laptop with local MySQL):
+
+| Request (median ms) | 12 products, 36 sales | 1,000 products, 60,036 sales | 5,000 products, 300,036 sales |
+|---|---|---|---|
+| `GET /api/products?status=REORDER` | 8 | 10 | 21 |
+| `GET /api/products?q=lager` | 8 | 10 | 19 |
+| `GET /api/sales` (one product, one month) | 7 | 9 | 11 |
+| `POST /api/sales` | 10 | 11 | 12 |
+| `GET /api/dashboard` | 10 | 34 | 149 |
+
+The first run showed the dashboard taking **511 ms** at 300,000 sales, because it summed every
+product's sales history to find the last 7 days and loaded every product to build the alerts.
+Step 7 fixed this: an index on `sale_date` (migration `003`), reading only recent sales, loading
+only products at or below their reorder point, and showing at most 20 stock alerts with a summary
+line for the rest. The dashboard now takes **149 ms** at 400 times today's data. Sales lookups
+use the `(product_id, sale_date)` index (checked with `EXPLAIN`), so their time barely changes.
+
+Growing further:
+
+- **More products:** the API pages every list (`?page=&size=`, at most 100 rows), but the
+  Inventory Master screen currently shows the first 100 products only; add page buttons before
+  going past 100 products.
+- **More branches:** add a `branches` table and a `branch_id` on products and sales; the model and
+  API stay the same, filtered by branch.
+- **More users:** gunicorn runs several worker processes (Step 6), each with its own database
+  connection per request, and sales lock only the product row they change (`SELECT ... FOR
+  UPDATE`), so two people logging sales of different products never wait for each other.
+- **Database:** Aiven can be resized without code changes; backups and migrations (Step 6) make
+  that move safe.
 
 ## Quick check
 
