@@ -1,6 +1,10 @@
 -- ============================================================================
 -- TapHouse Sports Bar and Grill - DIDSS Database Schema (Step 3)
 -- Normalised to Third Normal Form (3NF) for MySQL 8.0+
+--
+-- This file is the full, current structure, used by init_db.py for a NEW database.
+-- An EXISTING database is upgraded step by step with migrate.py (migrations/),
+-- so its data is kept. Add every future change in both places.
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -75,4 +79,22 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash VARCHAR(255) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- ----------------------------------------------------------------------------
+-- 5. Stock Receipts (Step 6, migration 002): every delivery received
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS stock_receipts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    product_id INT NOT NULL,
+    quantity INT NOT NULL CHECK (quantity > 0),
+    received_by INT NULL,
+    received_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_receipt_product FOREIGN KEY (product_id) REFERENCES products(id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_receipt_user FOREIGN KEY (received_by) REFERENCES users(id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    INDEX idx_receipts_product_date (product_id, received_at)
 );

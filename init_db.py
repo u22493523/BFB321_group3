@@ -2,16 +2,21 @@
 
     python init_db.py           create tables, load sample data if empty
     python init_db.py --reset   DROP the tables first (deletes your data!)
+
+To change the tables of a database that already holds real data, do NOT
+reset it: add a migration and run `python migrate.py up` (see migrate.py).
 """
 import os
 import sys
 
+import migrate
 from db import BASE_DIR, connect
 from supply_chain import DEFAULT_SERVICE_LEVEL, recommend
 
 # Children before parents: sales_orders references products,
 # products references suppliers.
-TABLES_IN_DROP_ORDER = ["sales_orders", "products", "suppliers", "users"]
+TABLES_IN_DROP_ORDER = ["stock_receipts", "sales_orders", "products", "suppliers", "users",
+                        "schema_migrations"]
 SEED_TABLES = ["suppliers", "products", "sales_orders", "users"]
 
 
@@ -58,6 +63,9 @@ def main(reset=False, database=None):
             print("Creating tables from schema.sql ...")
             for stmt in read_statements("schema.sql"):
                 cur.execute(stmt)
+            cur.execute("SHOW TABLES LIKE 'schema_migrations'")
+            if reset or cur.fetchone() is None:
+                migrate.baseline(cur)      # schema.sql already includes every migration
 
             cur.execute("SELECT COUNT(*) AS n FROM products")
             if cur.fetchone()["n"] == 0:
