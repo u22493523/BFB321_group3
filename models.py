@@ -75,10 +75,9 @@ def get_product(product_id):
 
 
 def get_reorder_products():
-    """Return products nearing/below ROP (plus key tracked items) for the dashboard table."""
+    """Return products at or below their reorder point, most urgent first (live data only)."""
     sql = PRODUCT_SELECT + """
         WHERE p.current_stock <= p.reorder_point
-           OR p.sku IN ('BEV-001', 'BEV-002', 'BEV-004')
         ORDER BY (p.current_stock - p.reorder_point) ASC, p.sku ASC
     """
     return _enrich_products(query_all(sql))
@@ -156,11 +155,26 @@ def dashboard_kpis():
                 f"({item['reorder_point']} units) before next {item['supplier_name']} delivery."
             ),
         })
-    alerts.append({
-        "type": "info",
-        "prefix": "Info:",
-        "message": "Demand forecast elevated: home rugby match this Saturday (+38% vs. baseline).",
-    })
+    # Elevated demand: last 7 days of sales vs the expected 7 x average daily demand.
+    # The 7 days end at the latest sale in the database, so the demo data keeps working.
+    recent = query_all("""
+        SELECT p.name, p.avg_daily_demand, COALESCE(SUM(o.quantity_sold), 0) AS qty_7d
+        FROM products p
+        LEFT JOIN sales_orders o
+               ON o.product_id = p.id
+              AND o.sale_date > (SELECT MAX(sale_date) FROM sales_orders) - INTERVAL 7 DAY
+        GROUP BY p.id, p.name, p.avg_daily_demand
+    """)
+    for r in recent:
+        expected = 7 * r["avg_daily_demand"]
+        if expected > 0 and r["qty_7d"] > 1.2 * expected:
+            uplift = round((r["qty_7d"] / expected - 1) * 100)
+            alerts.append({
+                "type": "info",
+                "prefix": "Info:",
+                "message": (f"Demand elevated: {r['name']} sold {int(r['qty_7d'])} units in the last "
+                            f"7 days, {uplift}% above the expected {expected}."),
+            })
 
     return {
         "service_level": service_level,
