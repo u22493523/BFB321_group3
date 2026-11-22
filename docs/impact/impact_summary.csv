@@ -1,0 +1,10 @@
+kpi,Manual (before),DIDSS (after),"DIDSS, orders capped at 30 days"
+Service level (fill rate),97.7,99.96,99.96
+Stockout days (product-days),190,3,2
+Units of demand lost,712,12,11
+Emergency orders,166,0,0
+Normal orders placed,337,96,156
+Average inventory value,16914.02,61741.27,44475.74
+Ordering + emergency cost,98110.0,12230.0,18590.0
+Holding cost,3373.54,12314.42,8870.78
+Total inventory cost,101483.54,24544.42,27460.78

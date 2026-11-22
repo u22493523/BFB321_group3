@@ -1,0 +1,37 @@
+sku,name,policy,service_level_pct,stockout_days,emergency_orders,orders,avg_inventory_value,total_cost
+BEV-001,Lager 500ml,Manual (before),97.5,14,11,30,1080.32,7775.47
+BEV-002,Cider 330ml,Manual (before),98.5,11,10,35,2238.63,7596.5
+BEV-003,House Red Wine,Manual (before),97.3,17,15,26,1215.36,10892.41
+BEV-004,Tonic Water,Manual (before),96.9,21,20,26,306.75,6941.18
+BEV-005,Craft IPA 440ml,Manual (before),97.9,17,16,27,1162.25,9231.81
+BEV-006,Draught Keg 30L,Manual (before),96.2,13,11,25,5550.69,12707.1
+BEV-007,Dry Lemon 200ml,Manual (before),97.5,17,12,25,367.24,4953.25
+BEV-008,Sauvignon Blanc 750ml,Manual (before),98.1,12,11,31,1766.37,9952.31
+BEV-009,Apple Cider 500ml,Manual (before),98.3,14,12,32,1344.46,7748.16
+BEV-010,Soda Water 200ml,Manual (before),97.0,20,18,26,362.49,6472.3
+BEV-011,Ginger Ale 200ml,Manual (before),97.0,16,13,28,260.9,5412.04
+BEV-012,Rosé Wine 750ml,Manual (before),97.0,18,17,26,1258.56,11801.02
+BEV-001,Lager 500ml,DIDSS (after),99.8,1,0,8,4304.66,1818.57
+BEV-002,Cider 330ml,DIDSS (after),100.0,0,0,11,5931.84,2393.12
+BEV-003,House Red Wine,DIDSS (after),100.0,0,0,8,5606.43,2318.21
+BEV-004,Tonic Water,DIDSS (after),100.0,0,0,6,2026.36,884.16
+BEV-005,Craft IPA 440ml,DIDSS (after),100.0,0,0,8,4953.57,1948.0
+BEV-006,Draught Keg 30L,DIDSS (after),100.0,0,0,13,15486.81,5688.88
+BEV-007,Dry Lemon 200ml,DIDSS (after),100.0,0,0,5,2096.44,818.14
+BEV-008,Sauvignon Blanc 750ml,DIDSS (after),99.9,1,0,9,6926.64,2731.53
+BEV-009,Apple Cider 500ml,DIDSS (after),100.0,0,0,9,4641.93,1915.84
+BEV-010,Soda Water 200ml,DIDSS (after),100.0,0,0,6,2262.28,931.22
+BEV-011,Ginger Ale 200ml,DIDSS (after),100.0,0,0,5,1830.42,765.08
+BEV-012,Rosé Wine 750ml,DIDSS (after),99.7,1,0,8,5673.89,2331.67
+BEV-001,Lager 500ml,"DIDSS, orders capped at 30 days",100.0,0,0,13,2623.38,2083.24
+BEV-002,Cider 330ml,"DIDSS, orders capped at 30 days",99.9,1,0,13,4982.04,2423.68
+BEV-003,House Red Wine,"DIDSS, orders capped at 30 days",100.0,0,0,13,3385.89,2625.32
+BEV-004,Tonic Water,"DIDSS, orders capped at 30 days",99.9,1,0,13,851.49,1209.83
+BEV-005,Craft IPA 440ml,"DIDSS, orders capped at 30 days",100.0,0,0,13,3030.68,2164.48
+BEV-006,Draught Keg 30L,"DIDSS, orders capped at 30 days",100.0,0,0,13,15486.81,5688.88
+BEV-007,Dry Lemon 200ml,"DIDSS, orders capped at 30 days",100.0,0,0,13,924.17,1224.33
+BEV-008,Sauvignon Blanc 750ml,"DIDSS, orders capped at 30 days",100.0,0,0,13,5005.98,2948.45
+BEV-009,Apple Cider 500ml,"DIDSS, orders capped at 30 days",100.0,0,0,13,3133.39,2054.96
+BEV-010,Soda Water 200ml,"DIDSS, orders capped at 30 days",100.0,0,0,13,974.59,1234.38
+BEV-011,Ginger Ale 200ml,"DIDSS, orders capped at 30 days",100.0,0,0,13,683.85,1176.39
+BEV-012,Rosé Wine 750ml,"DIDSS, orders capped at 30 days",100.0,0,0,13,3393.46,2626.83
