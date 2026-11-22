@@ -1,50 +1,8 @@
 """SQL queries and supply chain business rules. app.py calls these functions;
 it never contains raw SQL itself, and nothing in here knows about HTML."""
-import math
-from statistics import NormalDist
-
 from db import query_all, query_one
-
-
-# =====================================================================
-# Supply Chain Inventory Formulas (Step 2)
-# =====================================================================
-def calculate_eoq(annual_demand, order_cost, holding_cost):
-    """Calculate Economic Order Quantity (EOQ) rounded to whole units."""
-    if annual_demand < 0 or order_cost < 0 or holding_cost <= 0:
-        raise ValueError("Demand and order cost must be non-negative, and holding cost must be positive.")
-    return round(math.sqrt((2 * annual_demand * order_cost) / holding_cost))
-
-
-def calculate_safety_stock(z_score, avg_lead_time, std_dev_demand, avg_demand, std_dev_lead_time):
-    """Calculate Safety Stock accounting for demand and lead-time variability (rounded up)."""
-    if (
-        z_score < 0
-        or avg_lead_time < 0
-        or std_dev_demand < 0
-        or avg_demand < 0
-        or std_dev_lead_time < 0
-    ):
-        raise ValueError("Safety stock inputs cannot be negative.")
-    variance_demand_lead_time = (
-        (avg_lead_time * (std_dev_demand ** 2))
-        + ((avg_demand ** 2) * (std_dev_lead_time ** 2))
-    )
-    return math.ceil(z_score * math.sqrt(variance_demand_lead_time))
-
-
-def calculate_reorder_point(avg_demand, avg_lead_time, safety_stock):
-    """Calculate Reorder Point (ROP) = expected lead-time demand + safety stock."""
-    if avg_demand < 0 or avg_lead_time < 0 or safety_stock < 0:
-        raise ValueError("Reorder point inputs cannot be negative.")
-    return round((avg_demand * avg_lead_time) + safety_stock)
-
-
-def z_from_service_level(service_level):
-    """Convert a target service level probability (0.5 <= service_level < 1) into its Z-score."""
-    if not (0.5 <= service_level < 1):
-        raise ValueError("Service level must be at least 0.5 (50%) and strictly less than 1.")
-    return NormalDist().inv_cdf(service_level)
+# Step 2 formulas live in supply_chain.py (no database code in there)
+from supply_chain import calculate_eoq
 
 
 # =====================================================================

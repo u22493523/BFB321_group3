@@ -5,7 +5,7 @@ import os
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
-from models import (calculate_eoq, calculate_safety_stock, calculate_reorder_point,
+from supply_chain import (calculate_eoq, calculate_safety_stock, calculate_reorder_point,
                               z_from_service_level)
 
 

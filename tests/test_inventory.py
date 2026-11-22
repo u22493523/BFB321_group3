@@ -3,8 +3,8 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import unittest
-from models import (calculate_eoq, calculate_safety_stock, calculate_reorder_point,
-                              z_from_service_level)
+from supply_chain import (calculate_eoq, calculate_safety_stock, calculate_reorder_point,
+                          recommend, z_from_service_level)
 
 
 # each formula checked against a hand calculation, plus the "bad input" cases
@@ -61,6 +61,22 @@ class TestInventoryModel(unittest.TestCase):
     def test_calculate_reorder_point(self):
         # Scenario: AvgD=50, L=4, SS=89 -> ROP = (50*4) + 89 = 289
         self.assertEqual(calculate_reorder_point(50, 4, 89), 289)
+
+    def test_recommend_for_seeded_lager(self):
+        # Lager 500ml from seed.sql: d=10, sigma_d=3.2, SAB lead time L=4, sigma_L=1, 95%
+        # SS  = 1.645 * sqrt(4*3.2^2 + 10^2*1^2) = 1.645 * sqrt(140.96) = 19.53 -> 20
+        # ROP = 10*4 + 20 = 60   (matches the reorder point in seed.sql)
+        # EOQ = sqrt(2*3650*120 / 3.10) = 531.6 -> 532
+        rec = recommend(10, 3.2, 4, 1.0, 3650, 120, 3.10)
+        self.assertEqual(rec["safety_stock"], 20)
+        self.assertEqual(rec["reorder_point"], 60)
+        self.assertEqual(rec["eoq"], 532)
+
+    def test_recommend_without_cost_data_has_no_eoq(self):
+        # a new product with no holding cost yet still gets SS and ROP, but EOQ is None
+        rec = recommend(10, 3.2, 4, 1.0, 0, 0, 0)
+        self.assertIsNone(rec["eoq"])
+        self.assertEqual(rec["reorder_point"], 60)
 
 
 if __name__ == '__main__':
