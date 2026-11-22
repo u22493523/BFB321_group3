@@ -1,13 +1,15 @@
-import os
-
 from flask import Flask, render_template, request
 
 import db
 import models
+from config import get_config
+from errors import configure_logging, register_error_handlers
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-only-change-me")
+app.config.from_object(get_config())   # development / testing / production from APP_ENV
 db.init_app(app)
+configure_logging(app)
+register_error_handlers(app)
 
 
 # ---------------------------------------------------------------------
@@ -33,4 +35,4 @@ def index():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=app.config["DEBUG"])
