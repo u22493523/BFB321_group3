@@ -689,14 +689,31 @@ CSV_COLUMNS = ("sale_date", "sku", "quantity_sold")        # unit_price is optio
 MAX_IMPORT_ROWS = 500
 
 
-def receive_stock(product_id, data):
+def receive_stock(product_id, data, user_id=None):
     """POST /api/products/<id>/receive: a supplier delivery arrived, add it to stock.
-    Used by the "Receive order" button next to products that need reordering."""
+    Used by the "Receive order" button next to products that need reordering.
+    Step 6: the delivery is also recorded in stock_receipts (who, when, how many),
+    in the same transaction as the stock change."""
     require_product(product_id)
     values = validate(data, RECEIVE_RULES, {"quantity"})
-    execute("UPDATE products SET current_stock = current_stock + %s WHERE id = %s",
-            (values["quantity"], product_id))
+    with transaction() as cur:
+        cur.execute("UPDATE products SET current_stock = current_stock + %s WHERE id = %s",
+                    (values["quantity"], product_id))
+        cur.execute("INSERT INTO stock_receipts (product_id, quantity, received_by) VALUES (%s, %s, %s)",
+                    (product_id, values["quantity"], user_id))
     return to_json(get_product(product_id))
+
+
+def list_receipts(product_id):
+    """GET /api/products/<id>/receipts: the delivery history of one product, newest first."""
+    require_product(product_id)
+    rows = query_all("""
+        SELECT r.id, r.product_id, r.quantity, r.received_at,
+               CONCAT(u.first_name, ' ', u.last_name) AS received_by
+        FROM stock_receipts r LEFT JOIN users u ON u.id = r.received_by
+        WHERE r.product_id = %s ORDER BY r.received_at DESC, r.id DESC LIMIT 50
+    """, (product_id,))
+    return [to_json(r) for r in rows]
 
 
 def import_sales(csv_text):

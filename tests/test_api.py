@@ -265,8 +265,9 @@ class TestLogin(ApiTestCase):
 
     def test_wrong_password_is_refused(self):
         guest = app.test_client()
-        self.assertEqual(guest.post("/login", data={"email": MANAGER["email"], "password": "nope"}).status_code, 401)
-        self.assertEqual(guest.post("/api/auth/login", json={**MANAGER, "password": "nope"}).status_code, 401)
+        with self.assertLogs("taphouse", level="WARNING"):          # failed sign-ins are logged (Step 6)
+            self.assertEqual(guest.post("/login", data={"email": MANAGER["email"], "password": "nope"}).status_code, 401)
+            self.assertEqual(guest.post("/api/auth/login", json={**MANAGER, "password": "nope"}).status_code, 401)
 
     def test_form_login_opens_dashboard_and_logout_closes_it(self):
         guest = app.test_client()

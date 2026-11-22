@@ -8,6 +8,7 @@ Werkzeug hash, never stored or compared as plain text.
     API reads  GET endpoints stay open so markers can test them with curl
     API writes POST and PATCH endpoints need a signed-in manager (401 otherwise)
 """
+import logging
 from functools import wraps
 
 from flask import (Blueprint, redirect, render_template, request, session,
@@ -18,6 +19,7 @@ from db import query_one
 from errors import APIError
 
 auth = Blueprint("auth", __name__)
+log = logging.getLogger("taphouse")
 
 
 def current_user():
@@ -33,7 +35,10 @@ def check_login(email, password):
     user = query_one("SELECT id, first_name, last_name, email, password_hash FROM users WHERE email = %s",
                      ((email or "").strip().lower(),))
     if user and check_password_hash(user["password_hash"], password or ""):
+        log.info("Sign-in: %s from %s", user["email"], request.remote_addr)
         return user
+    # Step 6: failed sign-ins are logged (never the password) so repeated attempts can be spotted
+    log.warning("Failed sign-in for %r from %s", (email or "")[:80], request.remote_addr)
     return None
 
 

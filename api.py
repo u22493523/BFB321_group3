@@ -12,15 +12,17 @@ Response shape
     success, a list       {"data": [...], "meta": {"page": 1, "size": 10, "total": 12, "pages": 2}}
     error                 {"error": {"code": 400, "message": "...", "details": {"field": "..."}}}
 """
-from datetime import date
+import logging
+from datetime import date, datetime
 
-from flask import Blueprint, current_app, jsonify, request, url_for
+from flask import Blueprint, current_app, jsonify, request, session, url_for
 
 import models
 from auth import api_login_required
 from errors import ValidationError
 
 api = Blueprint("api", __name__, url_prefix="/api")
+log = logging.getLogger("taphouse")
 
 STATUSES = ("URGENT", "REORDER", "OK")
 
@@ -182,7 +184,13 @@ def recalculate_product(product_id):
 @api_login_required
 def receive_stock(product_id):
     """POST /api/products/<id>/receive {"quantity": 532}: a delivery arrived, add it to stock."""
-    return jsonify(data=models.receive_stock(product_id, _body()))
+    return jsonify(data=models.receive_stock(product_id, _body(), session.get("user_id")))
+
+
+@api.get("/products/<int:product_id>/receipts")
+def list_receipts(product_id):
+    """GET /api/products/<id>/receipts: deliveries received for one product (Step 6 audit trail)."""
+    return jsonify(data=models.list_receipts(product_id))
 
 
 # ---------------------------------------------------------------------
@@ -265,6 +273,34 @@ def import_sales():
 def get_sale(sale_id):
     """GET /api/sales/<id>"""
     return jsonify(data=models.get_sale(sale_id))
+
+
+# ---------------------------------------------------------------------
+# Health check (Step 6): for uptime monitors and a quick check after deploying
+# ---------------------------------------------------------------------
+@api.get("/health")
+def health():
+    """GET /api/health: 200 if the app and the database work, otherwise 503.
+    Also reports the environment and whether any migrations are still pending."""
+    import migrate
+    from db import get_db
+
+    body = {"status": "ok", "environment": current_app.config["ENV_NAME"],
+            "database": "ok", "migrations": {}, "time": datetime.now().isoformat(timespec="seconds")}
+    try:
+        with get_db().cursor() as cur:
+            cur.execute("SELECT 1")
+            done = set(migrate.applied_versions(cur))
+        get_db().commit()
+        pending = [f"{v}_{n}" for v, n, _, _ in migrate.available() if v not in done]
+        body["migrations"] = {"applied": len(done), "pending": pending}
+        if pending:
+            body["status"] = "degraded"           # works, but run: python migrate.py up
+    except Exception as exc:                       # any database problem -> 503, logged
+        log.error("Health check failed: %s", exc)
+        body.update(status="error", database="unreachable")
+        return jsonify(data=body), 503
+    return jsonify(data=body)
 
 
 # ---------------------------------------------------------------------

@@ -3,3 +3,7 @@ PyMySQL>=1.1.0
 python-dotenv>=1.0.0
 cryptography>=42.0.0
 Werkzeug>=3.0.0
+
+# Production web server (Step 6): gunicorn on Linux/macOS, waitress on Windows
+gunicorn>=22.0.0; sys_platform != "win32"
+waitress>=3.0.0; sys_platform == "win32"
