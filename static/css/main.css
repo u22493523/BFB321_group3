@@ -115,3 +115,14 @@ p.subhead {
 .bg-taphouse {
     background-color: #0c3a13 !important; /* Changes the header background style to dark green. '!important' forces this rule to override Bootstrap */
 }
+/* Step 5: messages after saving stay visible at the top while scrolling */
+.flash-area {
+    position: sticky; /* stays in view at the top of the window */
+    top: 0.5rem;
+    z-index: 1050; /* above the cards and tables */
+}
+
+/* Step 5: the signed-in manager's name next to Sign out */
+.navbar-text {
+    color: rgba(255, 255, 255, 0.85) !important;
+}
