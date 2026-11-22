@@ -105,10 +105,15 @@ def list_suppliers():
 # =====================================================================
 # Dashboard KPIs, 7-Day Forecast & Alerts
 # =====================================================================
+MAX_STOCK_ALERTS = 20
+
+
 def dashboard_kpis():
     """Compute live dashboard KPI cards, 7-day demand chart, and dynamic alerts from MySQL."""
-    products = list_products()
-    total_products = len(products)
+    # Step 7: only products at or below their reorder point are loaded (not every product),
+    # most urgent first, so this stays fast with thousands of products.
+    total_products = query_one("SELECT COUNT(*) AS n FROM products")["n"]
+    products = get_reorder_products()
 
     inv_row = query_one(
         "SELECT COALESCE(SUM(current_stock * unit_cost), 0) AS total_val FROM products"
@@ -130,20 +135,27 @@ def dashboard_kpis():
     else:
         service_level = 100
 
-    # 7-day demand distribution pulled from historical sales_orders in MySQL
+    # Step 7: the newest sale date, found once with idx_sales_date (migration 003). The
+    # weekday chart and the demand alert only read sales after a cut-off from this date,
+    # so the dashboard stays fast as the sales history grows (see scale_test.py).
+    latest = query_one("SELECT MAX(sale_date) AS latest FROM sales_orders")["latest"]
+
+    # Units sold per weekday over the last 12 weeks
     sales_by_dow = query_all("""
         SELECT DAYOFWEEK(sale_date) AS dow, COALESCE(SUM(quantity_sold), 0) AS total_qty
         FROM sales_orders
+        WHERE sale_date > %s - INTERVAL 84 DAY
         GROUP BY DAYOFWEEK(sale_date)
-    """)
+    """, (latest,)) if latest else []
     # MySQL DAYOFWEEK: 1=Sun, 2=Mon, 3=Tue, 4=Wed, 5=Thu, 6=Fri, 7=Sat
     dow_map = {int(r["dow"]): int(r["total_qty"]) for r in sales_by_dow}
     ordered_dows = [2, 3, 4, 5, 6, 7, 1]
     forecast_7day = [dow_map.get(d, 0) for d in ordered_dows]
 
-    # Dynamic alerts generated from live database stock & lead times
+    # Dynamic alerts generated from live database stock & lead times.
+    # At most MAX_STOCK_ALERTS, most urgent first; the rest are summarised in one line.
     alerts = []
-    for item in urgent_items:
+    for item in urgent_items[:MAX_STOCK_ALERTS]:
         alerts.append({
             "type": "danger",
             "prefix": "Urgent:",
@@ -153,7 +165,7 @@ def dashboard_kpis():
                 f"(supplier {item['supplier_name']} lead time {item['lead_time_days']} days)."
             ),
         })
-    for item in reorder_items:
+    for item in reorder_items[:max(0, MAX_STOCK_ALERTS - len(urgent_items))]:
         alerts.append({
             "type": "warning",
             "prefix": "Warning:",
@@ -162,16 +174,22 @@ def dashboard_kpis():
                 f"({item['reorder_point']} units) before next {item['supplier_name']} delivery."
             ),
         })
+    hidden = len(urgent_items) + len(reorder_items) - MAX_STOCK_ALERTS
+    if hidden > 0:
+        alerts.append({"type": "secondary", "prefix": "More:",
+                       "message": f"{hidden} more products are at or below their reorder point "
+                                  f"(see Inventory Master or GET /api/products?status=REORDER)."})
     # Elevated demand: last 7 days of sales vs the expected 7 x average daily demand.
     # The 7 days end at the latest sale in the database, so the demo data keeps working.
     recent = query_all("""
-        SELECT p.name, p.avg_daily_demand, COALESCE(SUM(o.quantity_sold), 0) AS qty_7d
-        FROM products p
-        LEFT JOIN sales_orders o
-               ON o.product_id = p.id
-              AND o.sale_date > (SELECT MAX(sale_date) FROM sales_orders) - INTERVAL 7 DAY
-        GROUP BY p.id, p.name, p.avg_daily_demand
-    """)
+        SELECT p.name, p.avg_daily_demand, r.qty_7d
+        FROM (SELECT product_id, SUM(quantity_sold) AS qty_7d
+              FROM sales_orders
+              WHERE sale_date > %s - INTERVAL 7 DAY
+              GROUP BY product_id) AS r
+        JOIN products p ON p.id = r.product_id
+        ORDER BY p.name
+    """, (latest,)) if latest else []
     for r in recent:
         expected = 7 * r["avg_daily_demand"]
         if expected > 0 and r["qty_7d"] > 1.2 * expected:

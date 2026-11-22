@@ -63,6 +63,18 @@ class OperationsTestCase(unittest.TestCase):
     def columns(self, table):
         return {r["Field"] for r in self.sql(f"SHOW COLUMNS FROM {table}")}
 
+    def roll_back_to_before(self, version):
+        """Undo migrations, newest first, until `version` is undone too. Works however
+        many migrations are added later. Returns the versions rolled back."""
+        undone = []
+        while version not in undone:
+            undone.append(migrate.down(TEST_DB, make_backup=False))
+        return undone
+
+    @staticmethod
+    def all_versions():
+        return [v for v, _, _, _ in migrate.available()]
+
 
 class TestMigrations(OperationsTestCase):
     def test_new_database_has_every_migration_recorded(self):
@@ -71,19 +83,19 @@ class TestMigrations(OperationsTestCase):
         self.assertEqual(len(result["applied"]), len(migrate.available()))
 
     def test_down_then_up_restores_the_table_and_keeps_data(self):
-        self.assertEqual(migrate.down(TEST_DB, make_backup=False), "002")
+        undone = self.roll_back_to_before("002")
+        self.assertEqual(undone[-1], "002")
         self.assertNotIn("stock_receipts", self.tables())
-        self.assertEqual(migrate.status(TEST_DB)["pending"], ["002_stock_receipts"])
-        self.assertEqual(migrate.up(TEST_DB, make_backup=False), ["002"])
+        self.assertIn("002_stock_receipts", migrate.status(TEST_DB)["pending"])
+        self.assertEqual(migrate.up(TEST_DB, make_backup=False), sorted(undone))
         self.assertIn("stock_receipts", self.tables())
         self.assertEqual(self.sql("SELECT COUNT(*) AS n FROM sales_orders")[0]["n"], 36)   # data kept
 
     def test_rolling_back_001_removes_the_columns_and_up_adds_them(self):
-        migrate.down(TEST_DB, make_backup=False)
-        migrate.down(TEST_DB, make_backup=False)
+        self.roll_back_to_before("001")
         self.assertNotIn("safety_stock", self.columns("products"))
         self.assertNotIn("updated_at", self.columns("users"))
-        self.assertEqual(migrate.up(TEST_DB, make_backup=False), ["001", "002"])
+        self.assertEqual(migrate.up(TEST_DB, make_backup=False), self.all_versions())
         self.assertIn("safety_stock", self.columns("products"))
         self.assertEqual(migrate.up(TEST_DB, make_backup=False), [])                    # nothing left
 
@@ -106,12 +118,12 @@ class TestBackupAndRestore(OperationsTestCase):
         self.assertEqual(self.sql("SELECT current_stock FROM products WHERE id = 1")[0]["current_stock"], 48)
 
     def test_restore_undoes_a_migration_made_after_the_backup(self):
-        migrate.down(TEST_DB, make_backup=False)          # state: only 001
+        self.roll_back_to_before("002")                   # state: only 001
         path = backup.create_backup(TEST_DB, folder=self.folder)
         migrate.up(TEST_DB, make_backup=False)            # 002 adds stock_receipts
         backup.restore(path, TEST_DB)
         self.assertNotIn("stock_receipts", self.tables())
-        self.assertEqual(migrate.status(TEST_DB)["pending"], ["002_stock_receipts"])
+        self.assertIn("002_stock_receipts", migrate.status(TEST_DB)["pending"])
 
     def test_text_with_quotes_and_semicolons_survives(self):
         conn = connect(TEST_DB)
@@ -140,10 +152,10 @@ class TestHealthAndAudit(OperationsTestCase):
         self.assertEqual(body["migrations"]["pending"], [])
 
     def test_health_shows_pending_migrations(self):
-        migrate.down(TEST_DB, make_backup=False)
+        latest = migrate.down(TEST_DB, make_backup=False)
         body = self.client.get("/api/health").get_json()["data"]
         self.assertEqual(body["status"], "degraded")
-        self.assertEqual(body["migrations"]["pending"], ["002_stock_receipts"])
+        self.assertEqual([m[:3] for m in body["migrations"]["pending"]], [latest])
 
     def test_health_is_503_when_the_database_is_down(self):
         with mock.patch("db.connect", side_effect=pymysql.err.OperationalError(2003, "down")), \

@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS sales_orders (
         FOREIGN KEY (product_id) REFERENCES products(id)
         ON UPDATE CASCADE
         ON DELETE RESTRICT,
-    INDEX idx_sales_product_date (product_id, sale_date)
+    INDEX idx_sales_product_date (product_id, sale_date),
+    INDEX idx_sales_date (sale_date)            -- migration 003: dashboard reads recent sales
 );
 
 -- ----------------------------------------------------------------------------

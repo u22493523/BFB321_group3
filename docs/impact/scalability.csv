@@ -1,0 +1,4 @@
+products,sales,GET /api/products?status=REORDER,GET /api/products?q=,"GET /api/sales (one product, one month)",POST /api/sales,GET /api/dashboard,index used for sales lookup
+12,36,8.1,8.2,7.4,9.7,9.7,idx_sales_product_date
+1000,60036,10.3,9.9,9.4,10.8,34.4,idx_sales_product_date
+5000,300036,20.9,18.8,10.5,11.9,149.0,idx_sales_product_date
