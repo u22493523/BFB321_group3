@@ -1,8 +1,15 @@
-"""SQL queries and supply chain business rules. app.py calls these functions;
-it never contains raw SQL itself, and nothing in here knows about HTML."""
-from db import query_all, query_one
+"""SQL queries and supply chain business rules. app.py and api.py call these
+functions; they never contain raw SQL themselves, and nothing in here knows
+about HTML. Every query uses %s placeholders, never string joining."""
+import math
+import re
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
+
+from db import execute, query_all, query_one, transaction
+from errors import ConflictError, NotFoundError, ValidationError
 # Step 2 formulas live in supply_chain.py (no database code in there)
-from supply_chain import calculate_eoq
+from supply_chain import DEFAULT_SERVICE_LEVEL, calculate_eoq, recommend
 
 
 # =====================================================================
@@ -183,4 +190,475 @@ def dashboard_kpis():
         "emergency_orders": emergency_orders,
         "forecast_7day": forecast_7day,
         "alerts": alerts,
+    }
+
+
+# =====================================================================
+# Step 4: validation rules for API input
+# =====================================================================
+SKU_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9-]{2,19}$")
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+MAX_MONEY = Decimal("99999999.99")      # DECIMAL(10,2)
+MAX_STD_DEV = Decimal("9999.99")        # DECIMAL(6,2)
+
+# field -> (kind, options). kind is "int", "money", "decimal", "text" or "email".
+PRODUCT_RULES = {
+    "sku": ("text", {"max_len": 20, "upper": True, "pattern": SKU_PATTERN,
+                     "pattern_msg": "Use 3-20 capital letters, digits or dashes, e.g. BEV-013."}),
+    "name": ("text", {"max_len": 120}),
+    "category": ("text", {"max_len": 60}),
+    "supplier_id": ("int", {"minimum": 1}),
+    "current_stock": ("int", {"minimum": 0, "maximum": 1_000_000}),
+    "unit_cost": ("money", {}),
+    "annual_demand": ("int", {"minimum": 0, "maximum": 10_000_000}),
+    "order_cost": ("money", {}),
+    "holding_cost": ("money", {}),
+    "avg_daily_demand": ("int", {"minimum": 0, "maximum": 100_000}),
+    "std_dev_demand": ("decimal", {"maximum": MAX_STD_DEV}),
+    "reorder_point": ("int", {"minimum": 0, "maximum": 1_000_000}),   # manual override (PATCH)
+    "image_filename": ("text", {"max_len": 120, "nullable": True}),
+}
+PRODUCT_REQUIRED = {"sku", "name", "category", "supplier_id", "unit_cost"}
+PRODUCT_DEFAULTS = {"current_stock": 0, "annual_demand": 0, "order_cost": Decimal("0"),
+                    "holding_cost": Decimal("0"), "avg_daily_demand": 0,
+                    "std_dev_demand": Decimal("0"), "image_filename": None}
+# Changing any of these changes the model's answer, so SS and ROP are recalculated
+DEMAND_FIELDS = {"avg_daily_demand", "std_dev_demand", "supplier_id"}
+
+SUPPLIER_RULES = {
+    "name": ("text", {"max_len": 100}),
+    "lead_time_days": ("int", {"minimum": 1, "maximum": 365}),
+    "std_dev_lead_time": ("decimal", {"maximum": MAX_STD_DEV}),
+    "contact_email": ("email", {"max_len": 160}),
+}
+SUPPLIER_REQUIRED = {"name", "lead_time_days", "contact_email"}
+LEAD_TIME_FIELDS = {"lead_time_days", "std_dev_lead_time"}
+
+SALE_RULES = {
+    "product_id": ("int", {"minimum": 1}),
+    "quantity_sold": ("int", {"minimum": 1, "maximum": 100_000}),
+    "unit_price": ("money", {}),
+    "sale_date": ("date", {}),
+}
+SALE_REQUIRED = {"product_id", "quantity_sold"}
+
+
+def _to_int(value):
+    """'12', 12 and 12.0 are whole numbers; True, 12.5 and 'abc' are not."""
+    if isinstance(value, bool):
+        raise ValueError
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise ValueError
+        return int(value)
+    return int(str(value).strip())
+
+
+def _to_decimal(value):
+    if isinstance(value, bool):
+        raise ValueError
+    number = Decimal(str(value).strip())
+    if not number.is_finite():
+        raise ValueError
+    return number
+
+
+def _to_date(value):
+    """Accept 2026-11-21 or 2026-11-21T18:30:00; dates in the future are refused."""
+    text = str(value).strip()
+    parsed = datetime.fromisoformat(text) if "T" in text or " " in text else \
+        datetime.combine(date.fromisoformat(text), datetime.min.time().replace(hour=12))
+    if parsed > datetime.now():
+        raise ValueError("future")
+    return parsed
+
+
+def _check_field(name, kind, options, value):
+    """Return (clean value, error message or None) for one field."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        if options.get("nullable"):
+            return None, None
+        return None, "This field is required."
+    try:
+        if kind == "int":
+            number = _to_int(value)
+            if number < options.get("minimum", 0):
+                return None, f"Must be {options.get('minimum', 0)} or more."
+            if "maximum" in options and number > options["maximum"]:
+                return None, f"Must be {options['maximum']} or less."
+            return number, None
+        if kind in ("money", "decimal"):
+            number = _to_decimal(value)
+            limit = options.get("maximum", MAX_MONEY)
+            if number < 0:
+                return None, "Cannot be negative."
+            if number > limit:
+                return None, f"Must be {limit} or less."
+            if number.as_tuple().exponent < -2:
+                return None, "Use at most 2 decimal places."
+            return number, None
+        if kind == "date":
+            return _to_date(value), None
+        if not isinstance(value, str):
+            return None, "Must be text."
+        text = value.strip().upper() if options.get("upper") else value.strip()
+        if len(text) > options.get("max_len", 255):
+            return None, f"Use {options['max_len']} characters or fewer."
+        if kind == "email" and not EMAIL_PATTERN.match(text):
+            return None, "Enter a valid email address, e.g. orders@sab.co.za."
+        if options.get("pattern") and not options["pattern"].match(text):
+            return None, options.get("pattern_msg", "Wrong format.")
+        return text, None
+    except (ValueError, TypeError, InvalidOperation) as exc:
+        if kind == "date":
+            if str(exc) == "future":
+                return None, "The date cannot be in the future."
+            return None, "Use the format YYYY-MM-DD."
+        return None, "Must be a whole number." if kind == "int" else "Must be a number."
+
+
+def validate(data, rules, required=(), partial=False, read_only=()):
+    """Check a JSON body against `rules`. Returns clean values or raises a 400
+    ValidationError listing every problem at once (not just the first)."""
+    if not isinstance(data, dict):
+        raise ValidationError({"body": "Send a JSON object, e.g. {\"name\": \"...\"}."})
+    errors, values = {}, {}
+    for name in data:
+        if name in read_only:
+            errors[name] = "This value is calculated by the system and cannot be set."
+        elif name not in rules:
+            errors[name] = "Unknown field."
+    for name, (kind, options) in rules.items():
+        if name in read_only:
+            continue
+        if name not in data:
+            if not partial and name in required:
+                errors[name] = "This field is required."
+            continue
+        value, error = _check_field(name, kind, options, data[name])
+        if error:
+            errors[name] = error
+        else:
+            values[name] = value
+    if partial and not data:
+        errors["body"] = "Send at least one field to change."
+    if errors:
+        raise ValidationError(errors)
+    return values
+
+
+def to_json(row):
+    """Make a database row safe for jsonify: Decimal -> float, dates -> ISO text."""
+    out = {}
+    for key, value in row.items():
+        if key == "badge":                       # HTML class, pages only
+            continue
+        if isinstance(value, Decimal):
+            value = float(value)
+        elif isinstance(value, (datetime, date)):
+            value = value.isoformat()
+        elif key == "order_qty":
+            key, value = "recommended_order_qty", (value if isinstance(value, int) else 0)
+        out[key] = value
+    return out
+
+
+def _page_meta(page, size, total):
+    return {"page": page, "size": size, "total": total, "pages": math.ceil(total / size) if size else 0}
+
+
+# =====================================================================
+# Step 4: products (create, read one/many, update, model recommendation)
+# =====================================================================
+# Same rule as stock_status(), written in SQL so the database can filter by it
+STATUS_SQL = """CASE WHEN p.current_stock <= p.safety_stock THEN 'URGENT'
+                     WHEN p.current_stock <= p.reorder_point THEN 'REORDER'
+                     ELSE 'OK' END"""
+PRODUCT_SORTS = {
+    "sku": "p.sku", "-sku": "p.sku DESC", "name": "p.name", "-name": "p.name DESC",
+    "stock": "p.current_stock", "-stock": "p.current_stock DESC",
+    "status": f"FIELD({STATUS_SQL}, 'URGENT', 'REORDER', 'OK'), p.sku",
+}
+
+
+def list_products_page(page=1, size=10, search="", category=None, status=None,
+                       supplier_id=None, sort="sku"):
+    """One page of products plus paging details, filtered in SQL."""
+    where, params = ["1=1"], []
+    if search:
+        where.append("(p.name LIKE %s OR p.sku LIKE %s)")
+        params += [f"%{search}%", f"%{search}%"]
+    if category:
+        where.append("p.category = %s")
+        params.append(category)
+    if supplier_id:
+        where.append("p.supplier_id = %s")
+        params.append(supplier_id)
+    if status:
+        where.append(f"{STATUS_SQL} = %s")
+        params.append(status)
+    clause = " WHERE " + " AND ".join(where)
+    total = query_one("SELECT COUNT(*) AS n FROM products p JOIN suppliers s ON s.id = p.supplier_id"
+                      + clause, params)["n"]
+    rows = query_all(PRODUCT_SELECT + clause + f" ORDER BY {PRODUCT_SORTS[sort]} LIMIT %s OFFSET %s",
+                     params + [size, (page - 1) * size])
+    return {"items": [to_json(r) for r in _enrich_products(rows)], "meta": _page_meta(page, size, total)}
+
+
+def require_product(product_id):
+    product = get_product(product_id)
+    if product is None:
+        raise NotFoundError(f"Product {product_id} not found.")
+    return product
+
+
+def _supplier_or_error(supplier_id):
+    supplier = query_one("SELECT id, lead_time_days, std_dev_lead_time FROM suppliers WHERE id = %s",
+                         (supplier_id,))
+    if supplier is None:
+        raise ValidationError({"supplier_id": f"Supplier {supplier_id} does not exist."})
+    return supplier
+
+
+def _model_output(product, supplier, service_level):
+    """Run the Step 2 model on one product's demand data and its supplier's lead time."""
+    return recommend(
+        avg_demand=product["avg_daily_demand"], std_dev_demand=float(product["std_dev_demand"]),
+        avg_lead_time=supplier["lead_time_days"], std_dev_lead_time=float(supplier["std_dev_lead_time"]),
+        annual_demand=product["annual_demand"], order_cost=float(product["order_cost"]),
+        holding_cost=float(product["holding_cost"]), service_level=service_level)
+
+
+def create_product(data, service_level=DEFAULT_SERVICE_LEVEL):
+    """POST /api/products: validate, insert, and let the model set SS and ROP."""
+    values = validate(data, PRODUCT_RULES, PRODUCT_REQUIRED,
+                      read_only={"safety_stock", "reorder_point", "id"})
+    values = {**PRODUCT_DEFAULTS, **values}
+    if query_one("SELECT id FROM products WHERE sku = %s", (values["sku"],)):
+        raise ConflictError("A product with this SKU already exists.",
+                            {"sku": f"{values['sku']} is already used."})
+    supplier = _supplier_or_error(values["supplier_id"])
+    model = _model_output(values, supplier, service_level)
+    columns = list(values) + ["safety_stock", "reorder_point"]
+    with transaction() as cur:
+        cur.execute(f"INSERT INTO products ({', '.join(columns)}) VALUES ({', '.join(['%s'] * len(columns))})",
+                    [values[c] for c in values] + [model["safety_stock"], model["reorder_point"]])
+        new_id = cur.lastrowid
+    return to_json(get_product(new_id))
+
+
+def update_product(product_id, data, service_level=DEFAULT_SERVICE_LEVEL):
+    """PATCH /api/products/<id>: change only the fields sent. If demand data or
+    the supplier changes, the model recalculates SS and ROP (unless a reorder
+    point is set by hand in the same request)."""
+    current = require_product(product_id)
+    values = validate(data, PRODUCT_RULES, partial=True, read_only={"safety_stock", "id"})
+    if "sku" in values and query_one("SELECT id FROM products WHERE sku = %s AND id <> %s",
+                                     (values["sku"], product_id)):
+        raise ConflictError("A product with this SKU already exists.",
+                            {"sku": f"{values['sku']} is already used."})
+    if "supplier_id" in values:
+        _supplier_or_error(values["supplier_id"])
+    if DEMAND_FIELDS & set(values) and "reorder_point" not in values:
+        merged = {**current, **values}
+        model = _model_output(merged, _supplier_or_error(merged["supplier_id"]), service_level)
+        values["safety_stock"], values["reorder_point"] = model["safety_stock"], model["reorder_point"]
+    assignments = ", ".join(f"{column} = %s" for column in values)
+    execute(f"UPDATE products SET {assignments} WHERE id = %s", list(values.values()) + [product_id])
+    return to_json(get_product(product_id))
+
+
+def product_recommendation(product_id, service_level=DEFAULT_SERVICE_LEVEL):
+    """GET /api/products/<id>/recommendation: what the model advises, without saving."""
+    product = require_product(product_id)
+    model = _model_output(product, product, service_level)
+    status, _badge, needs_order = stock_status(product["current_stock"], model["safety_stock"],
+                                               model["reorder_point"])
+    order_qty = 0
+    if needs_order:
+        order_qty = model["eoq"] or max(model["reorder_point"] - product["current_stock"], 0)
+    return {
+        "product_id": product["id"], "sku": product["sku"], "name": product["name"],
+        "inputs": {
+            "avg_daily_demand": product["avg_daily_demand"],
+            "std_dev_demand": float(product["std_dev_demand"]),
+            "lead_time_days": product["lead_time_days"],
+            "std_dev_lead_time": float(product["std_dev_lead_time"]),
+            "annual_demand": product["annual_demand"],
+            "order_cost": float(product["order_cost"]),
+            "holding_cost": float(product["holding_cost"]),
+            "current_stock": product["current_stock"],
+        },
+        **model,
+        "status": status,
+        "recommended_order_qty": order_qty,
+        "saved_safety_stock": product["safety_stock"],
+        "saved_reorder_point": product["reorder_point"],
+    }
+
+
+def recalculate_product(product_id, service_level=DEFAULT_SERVICE_LEVEL):
+    """POST /api/products/<id>/recalculate: save the model's SS and ROP."""
+    rec = product_recommendation(product_id, service_level)
+    execute("UPDATE products SET safety_stock = %s, reorder_point = %s WHERE id = %s",
+            (rec["safety_stock"], rec["reorder_point"], product_id))
+    return to_json(get_product(product_id))
+
+
+# =====================================================================
+# Step 4: suppliers (create, read one/many, update)
+# =====================================================================
+SUPPLIER_SELECT = """
+    SELECT s.id, s.name, s.lead_time_days, s.std_dev_lead_time, s.contact_email,
+           s.created_at, s.updated_at, COUNT(p.id) AS product_count
+    FROM suppliers s
+    LEFT JOIN products p ON p.supplier_id = s.id
+"""
+
+
+def list_suppliers_api(search=""):
+    sql, params = SUPPLIER_SELECT, []
+    if search:
+        sql += " WHERE s.name LIKE %s"
+        params.append(f"%{search}%")
+    rows = query_all(sql + " GROUP BY s.id ORDER BY s.name", params)
+    return [to_json(r) for r in rows]
+
+
+def get_supplier(supplier_id):
+    row = query_one(SUPPLIER_SELECT + " WHERE s.id = %s GROUP BY s.id", (supplier_id,))
+    if row is None:
+        raise NotFoundError(f"Supplier {supplier_id} not found.")
+    return to_json(row)
+
+
+def create_supplier(data):
+    values = validate(data, SUPPLIER_RULES, SUPPLIER_REQUIRED, read_only={"id"})
+    values.setdefault("std_dev_lead_time", Decimal("0"))
+    if query_one("SELECT id FROM suppliers WHERE name = %s", (values["name"],)):
+        raise ConflictError("A supplier with this name already exists.",
+                            {"name": f"{values['name']} is already used."})
+    new_id = execute(f"INSERT INTO suppliers ({', '.join(values)}) VALUES ({', '.join(['%s'] * len(values))})",
+                     list(values.values()))
+    return get_supplier(new_id)
+
+
+def update_supplier(supplier_id, data, service_level=DEFAULT_SERVICE_LEVEL):
+    """PATCH /api/suppliers/<id>. A new lead time changes the safety stock and
+    reorder point of every product from this supplier, so they are
+    recalculated in the same transaction."""
+    get_supplier(supplier_id)                                      # 404 if missing
+    values = validate(data, SUPPLIER_RULES, partial=True, read_only={"id"})
+    if "name" in values and query_one("SELECT id FROM suppliers WHERE name = %s AND id <> %s",
+                                      (values["name"], supplier_id)):
+        raise ConflictError("A supplier with this name already exists.",
+                            {"name": f"{values['name']} is already used."})
+    with transaction() as cur:
+        assignments = ", ".join(f"{column} = %s" for column in values)
+        cur.execute(f"UPDATE suppliers SET {assignments} WHERE id = %s", list(values.values()) + [supplier_id])
+        if LEAD_TIME_FIELDS & set(values):
+            cur.execute("SELECT id, lead_time_days, std_dev_lead_time FROM suppliers WHERE id = %s",
+                        (supplier_id,))
+            supplier = cur.fetchone()
+            cur.execute("""SELECT id, avg_daily_demand, std_dev_demand, annual_demand, order_cost,
+                                  holding_cost FROM products WHERE supplier_id = %s""", (supplier_id,))
+            for product in cur.fetchall():
+                model = _model_output(product, supplier, service_level)
+                cur.execute("UPDATE products SET safety_stock = %s, reorder_point = %s WHERE id = %s",
+                            (model["safety_stock"], model["reorder_point"], product["id"]))
+    return get_supplier(supplier_id)
+
+
+# =====================================================================
+# Step 4: sales (create, read one/many). Logging a sale reduces stock.
+# =====================================================================
+SALE_SELECT = """
+    SELECT o.id, o.product_id, p.sku, p.name AS product_name, o.quantity_sold, o.unit_price,
+           o.quantity_sold * o.unit_price AS line_total, o.sale_date, o.created_at
+    FROM sales_orders o
+    JOIN products p ON p.id = o.product_id
+"""
+
+
+def list_sales_page(page=1, size=10, product_id=None, date_from=None, date_to=None):
+    where, params = ["1=1"], []
+    if product_id:
+        where.append("o.product_id = %s")
+        params.append(product_id)
+    if date_from:
+        where.append("o.sale_date >= %s")
+        params.append(date_from)
+    if date_to:
+        where.append("o.sale_date < %s + INTERVAL 1 DAY")
+        params.append(date_to)
+    clause = " WHERE " + " AND ".join(where)
+    total = query_one("SELECT COUNT(*) AS n FROM sales_orders o" + clause, params)["n"]
+    rows = query_all(SALE_SELECT + clause + " ORDER BY o.sale_date DESC, o.id DESC LIMIT %s OFFSET %s",
+                     params + [size, (page - 1) * size])
+    return {"items": [to_json(r) for r in rows], "meta": _page_meta(page, size, total)}
+
+
+def get_sale(sale_id):
+    row = query_one(SALE_SELECT + " WHERE o.id = %s", (sale_id,))
+    if row is None:
+        raise NotFoundError(f"Sale {sale_id} not found.")
+    return to_json(row)
+
+
+def create_sale(data):
+    """POST /api/sales: record the sale AND reduce stock in one transaction.
+    A sale larger than the stock on hand is refused and nothing changes."""
+    values = validate(data, SALE_RULES, SALE_REQUIRED, read_only={"id"})
+    with transaction() as cur:
+        # FOR UPDATE locks the product row so two sales at once can't oversell it
+        cur.execute("SELECT id, name, current_stock, unit_cost FROM products WHERE id = %s FOR UPDATE",
+                    (values["product_id"],))
+        product = cur.fetchone()
+        if product is None:
+            raise ValidationError({"product_id": f"Product {values['product_id']} does not exist."})
+        if values["quantity_sold"] > product["current_stock"]:
+            raise ConflictError(
+                f"Only {product['current_stock']} units of {product['name']} are in stock.",
+                {"quantity_sold": f"Must be {product['current_stock']} or less."})
+        if "unit_price" not in values:
+            # no price given: use this product's latest selling price, or its cost
+            cur.execute("""SELECT unit_price FROM sales_orders WHERE product_id = %s
+                           ORDER BY sale_date DESC, id DESC LIMIT 1""", (product["id"],))
+            last = cur.fetchone()
+            values["unit_price"] = last["unit_price"] if last else product["unit_cost"]
+        cur.execute("""INSERT INTO sales_orders (product_id, quantity_sold, unit_price, sale_date)
+                       VALUES (%s, %s, %s, COALESCE(%s, NOW()))""",
+                    (product["id"], values["quantity_sold"], values["unit_price"], values.get("sale_date")))
+        sale_id = cur.lastrowid
+        cur.execute("UPDATE products SET current_stock = current_stock - %s WHERE id = %s",
+                    (values["quantity_sold"], product["id"]))
+    return {"sale": get_sale(sale_id), "product": to_json(get_product(product["id"]))}
+
+
+# =====================================================================
+# Step 4: dashboard figures as JSON
+# =====================================================================
+def dashboard_api():
+    """GET /api/dashboard: the KPI cards, counts, 7-day demand and alerts."""
+    kpis = dashboard_kpis()
+    counts = query_one("""
+        SELECT (SELECT COUNT(*) FROM products) AS products,
+               (SELECT COUNT(*) FROM suppliers) AS suppliers,
+               (SELECT COUNT(*) FROM sales_orders) AS sales,
+               (SELECT COALESCE(SUM(current_stock * unit_cost), 0) FROM products) AS inventory_value
+    """)
+    status_rows = query_all(f"SELECT {STATUS_SQL} AS status, COUNT(*) AS n FROM products p GROUP BY status")
+    by_status = {"URGENT": 0, "REORDER": 0, "OK": 0}
+    by_status.update({r["status"]: r["n"] for r in status_rows})
+    return {
+        "service_level_pct": kpis["service_level"],
+        "stockout_events": kpis["stockout_events"],
+        "inventory_value": float(counts["inventory_value"]),
+        "emergency_orders": kpis["emergency_orders"],
+        "counts": {"products": counts["products"], "suppliers": counts["suppliers"],
+                   "sales": counts["sales"]},
+        "status_counts": by_status,
+        "demand_by_weekday": dict(zip(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+                                      kpis["forecast_7day"])),
+        "alerts": kpis["alerts"],
     }
