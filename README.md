@@ -29,11 +29,30 @@ Stack: HTML/CSS/Bootstrap frontend · Flask backend · MySQL (local or Aiven) ·
 | Step 5: manager login, CSV import, receive orders, scenario evaluation, live dashboard (fetch) | Thejas Nirghin | *Step 5 (1/4)* to *Step 5 (4/4)* |
 | Step 6: migrations with rollback, backup and restore, health check, audit trail, production setup | Nehar Lalla | *Step 6 (1/4)* to *Step 6 (4/4)* |
 | Step 7: impact simulation (before/after KPIs and charts), scalability test and dashboard speed-up | Thejas Nirghin | *Step 7 (1/3)* to *Step 7 (3/3)* |
-| Part C report and Part B video | Nehar Lalla and Thejas Nirghin | (submitted on clickUP) |
+
+## Features
+
+| Page | Description |
+|---|---|
+| **Dashboard** | Live overview of inventory KPIs, stock status counts, weekday demand chart, and reorder alerts |
+| **Inventory Master** | Add, view, and update beverage products with model-calculated safety stock and reorder points |
+| **Stock & Sales Tracking** | Log daily sales, upload till CSV exports, and record supplier deliveries with full receipt history |
+| **Scenario Evaluation** | Continuous-review (Q, R) model allowing live testing of demand changes, lead times, and service levels (95%–99.9%) |
+| **Supplier Management** | Manage supplier contact details and lead times, automatically recalculating reorder policies for linked products |
+| **Manager Authentication** | Session-based login protecting all inventory, supplier, and sales updates |
+
+## Tech Stack
+
+- **Flask**: Routing, REST API blueprints, session authentication, and templating
+- **HTML5 & CSS3**: Page structure and custom styling
+- **Bootstrap 5**: UI framework, responsive layout, and styling
+- **Chart.js 4.4.1**: Interactive weekday demand and inventory visualizations
+- **MySQL & PyMySQL (Aiven cloud database)**: Relational 3NF database persistence
+- **Python & Matplotlib**: Continuous-review, inventory modeling, automated unit testing, and simulation charts
 
 ## Project structure
 
-Follows the class sample project ([bfb321/FLASK](https://github.com/bfb321/FLASK)): each file has one job.
+Tries to similarly follow the class sample project ([bfb321/FLASK](https://github.com/bfb321/FLASK)): as mentioned by Mr Akanbi in class.
 
 ```
 BFB321_group3/
@@ -161,28 +180,6 @@ erDiagram
   current_stock)`, `idx_products_supplier_rop (supplier_id, reorder_point)` and
   `idx_sales_product_date (product_id, sale_date)` and `idx_receipts_product_date (product_id, received_at)`.
 
-### How the supply chain model sets safety stock and reorder points
-
-`safety_stock` and `reorder_point` are not typed into `seed.sql`. When the database is built,
-`init_db.py` reads each product's demand and its supplier's lead time and calls `supply_chain.py`:
-
-| Quantity | Formula |
-|---|---|
-| Safety stock | SS = z · √( L·σ_d² + d²·σ_L² ), with z = 1.645 for 95% |
-| Reorder point | ROP = d·L + SS |
-| Economic order quantity | EOQ = √( 2DS / H ) |
-
-Example, Lager 500ml: d = 10, σ_d = 3.2, L = 4 days, σ_L = 1 day →
-SS = 1.645 × √(4 × 3.2² + 10² × 1²) = 19.5 → **20**, ROP = 10 × 4 + 20 = **60**.
-
-Stock status is calculated, never typed in:
-
-| Condition | Status |
-|---|---|
-| `current_stock <= safety_stock` | URGENT |
-| `current_stock <= reorder_point` | REORDER |
-| otherwise | OK |
-
 ## How to run the application
 
 ### 1. Get the code
@@ -215,10 +212,15 @@ copy .env.example .env      # Windows
 cp .env.example .env        # macOS / Linux
 ```
 
-Open `.env` and fill in your MySQL details. For a local MySQL Workbench server keep
-`DB_HOST=127.0.0.1` and `DB_PORT=3306`; for Aiven use the host, port, user and password from
-**Service → Overview → Connection information**. Create an empty database named `taphouse_didss`
-first (`CREATE DATABASE taphouse_didss;`). `.env` is listed in `.gitignore`: never commit it.
+```bash
+DB_HOST=mysql-16876cd9-bfb321-group3.g.aivencloud.com
+DB_PORT=16355
+DB_USER=avnadmin
+DB_PASSWORD=AVNS__Mlt_Kq5-YiDBL6_AQx
+DB_NAME=defaultdb
+SECRET_KEY=taphouse-bfb321-secret-key-2026
+```
+.env holds your password and is listed in .gitignore.
 
 ### 4. Create the tables, load the sample data and run the model
 
@@ -262,9 +264,6 @@ The dashboard asks you to sign in first (<http://127.0.0.1:5000/login>):
 |---|---|
 | `manager@taphouse.co.za` | `TapHouse2026!` |
 
-The password is stored as a Werkzeug hash in the `users` table, never as plain text. This is a
-test account for markers; change it before using the app for real.
-
 ### Run the tests
 
 ```bash
@@ -279,13 +278,6 @@ The API and operations tests use a separate database (`TEST_DB_NAME`, default
 touched; your MySQL user needs permission to create it. If MySQL is not running, those tests are
 skipped and the formula tests still run.
 
-## Using the dashboard (Step 5)
-
-After signing in, every action calls the REST API with `fetch()` (`static/js/app.js`) and the KPI
-cards, reorder table, alerts, chart and product list are redrawn from the API's answer, so the
-page never reloads. Success and error messages appear under the form; fields the API rejected are
-outlined in red.
-
 ### Three end-to-end flows
 
 | # | Flow | Screen → API → database | What changes on screen |
@@ -293,23 +285,6 @@ outlined in red.
 | 1 | **A sale pushes a product below its reorder point** | Data Management → *Log Sales* → `POST /api/sales` → one transaction inserts the sale and reduces stock | Stock and status in the message; inventory value KPI drops; the product appears in *Products Nearing Reorder Point* with the EOQ to order; a new alert; the weekday chart rises |
 | 2 | **A supplier's lead time changes and the model reacts** | Data Management → *Update Supplier Lead Time* → `PATCH /api/suppliers/<id>` → `supply_chain.recommend()` recalculates safety stock and reorder point for every product from that supplier | The message lists each product's old and new reorder point; products that are now below it move into the reorder table |
 | 3 | **Upload the till's CSV, then receive the order** | *Upload Historical POS Data* → `POST /api/sales/import` (all rows saved or none) → dashboard → *Receive order* → `POST /api/products/<id>/receive` | Imported count; KPIs and reorder table update; after *Receive order* the product's stock rises by the EOQ and it leaves the reorder table |
-
-Also on the page:
-
-- **Inventory Master → + Add Product / Edit** (`POST` and `PATCH /api/products`). The model sets
-  safety stock and reorder point from the demand figures and the supplier's lead time.
-- **Scenario Evaluation** (`GET /api/products/<id>/recommendation`). Pick a product, a demand
-  change (for example +38% for a home rugby match), a lead time and a service level (95–99.9%);
-  the page compares the saved policy with the scenario. Nothing is saved.
-
-Try it with fresh sample data (`python init_db.py --reset`):
-
-1. Log a sale of **100 Cider 330ml**: stock 112 → 12, status **URGENT** (12 ≤ safety stock 19),
-   inventory value R 17,856.80 → R 16,056.80, and Cider joins the reorder table with an order
-   quantity of 616.
-2. Change **Beverage Co** to **7 days**: Tonic Water's reorder point 36 → 55, Soda Water 48 → 73.
-3. Upload `data/sample_pos_export.csv`: 5 sales imported; Lager 48 → 33. Click **Receive order**
-   on Lager: stock 33 → 565 and the row disappears.
 
 ### CSV format
 
@@ -481,109 +456,6 @@ unexpected errors include the full traceback in the log (never in the response):
 2026-11-22 10:24:17,050 INFO    taphouse: POST /api/sales -> 409 Only 20 units of House Red Wine are in stock.
 ```
 
-## Deployment and operations (Step 6)
-
-### Environments
-
-| | Development | Testing | Production |
-|---|---|---|---|
-| Set with | `APP_ENV=development` | set by the tests | `APP_ENV=production` |
-| Run with | `python app.py` | `python -m unittest ...` | gunicorn (macOS/Linux) or waitress (Windows) |
-| Database | `DB_NAME` (local MySQL or Aiven) | `TEST_DB_NAME`, rebuilt for every test | `DB_NAME` on Aiven, with `DB_SSL_CA` |
-| Debug / error pages | on | off | off, JSON errors only, no stack traces |
-| Cookies | normal | normal | `Secure` (HTTPS only), `HttpOnly`, `SameSite=Lax` |
-| `SECRET_KEY` | any | any | **required**: 32+ random characters, or the app refuses to start |
-
-### Run in production
-
-```bash
-# 1. In .env: APP_ENV=production, the Aiven DB_* values, DB_SSL_CA=ca.pem and a real secret:
-python -c "import secrets; print(secrets.token_hex(32))"     # paste the result as SECRET_KEY
-
-# 2. Install, then bring the database up to date (takes a backup first)
-pip install -r requirements.txt
-python migrate.py up
-
-# 3. Start the server (4 worker processes)
-gunicorn -w 4 -b 0.0.0.0:8000 app:app                     # macOS / Linux
-waitress-serve --port=8000 app:app                        # Windows
-
-# 4. Check it
-curl http://127.0.0.1:8000/api/health
-```
-
-Put the app behind HTTPS (for example the hosting platform's proxy): in production the login
-cookie is only sent over HTTPS.
-
-### Database changes: migrations
-
-`schema.sql` builds a **new** database. A database that already holds real sales must never be
-reset, so every change to the tables is also written as a numbered migration in `migrations/`,
-each with an `up` file (apply) and a `down` file (undo). The table `schema_migrations` records
-which ones this database has.
-
-| Migration | Change | Rollback |
-|---|---|---|
-| `001_inventory_policy_columns` | Adds `products.safety_stock` and `users.updated_at` (databases built before the Step 3 fix) | Drops both columns |
-| `002_stock_receipts` | Adds the `stock_receipts` table: every delivery, who received it and when | Drops the table (stock levels are unchanged) |
-| `003_sales_date_index` | Adds an index on `sales_orders.sale_date` (Step 7: keeps the dashboard fast as sales grow) | Drops the index |
-
-```bash
-python migrate.py status      # 3 applied, 0 pending
-python migrate.py up          # backs up, then applies anything pending, oldest first
-python migrate.py down        # backs up, then undoes the most recent migration
-python migrate.py baseline    # a database built by init_db.py already has them all: just record them
-```
-
-To add a change: write `003_short_name.up.sql` and `003_short_name.down.sql`, add the same change
-to `schema.sql`, test `up`, `down` and `up` again on the test database, then commit. `migrate.py`
-refuses a migration without a `.down.sql`.
-
-### Backup and restore
-
-```bash
-python backup.py                  # backups/taphouse_didss-20261122-183000.sql
-python backup.py list             # newest first
-python backup.py restore latest   # asks you to type YES, then replaces every table
-```
-
-A backup is a plain `.sql` file with every table's structure and rows, made with PyMySQL (no
-`mysqldump` needed), so it also restores with `mysql taphouse_didss < backups/<file>.sql`.
-`migrate.py up` and `down` make one automatically before changing anything. Restoring makes the
-database exactly match the backup, including dropping tables created after it.
-
-On Aiven, the service also keeps its own daily backups (Service → Backups), which can be restored
-from the Aiven console. Take a `backup.py` backup before every deployment as well, and keep a copy
-off the laptop (e.g. OneDrive): `backups/` is not committed to GitHub because it contains data.
-
-### Rollback plan
-
-| What went wrong | Do this |
-|---|---|
-| New code is broken, database is fine | On GitHub, open the bad commit → **Revert**, or `git revert <commit>`; redeploy; check `/api/health` |
-| A migration failed half-way | `python backup.py restore latest` (the backup `migrate.py` made just before), fix the `.up.sql`, run `up` again |
-| A migration worked but the change is wrong | `python migrate.py down`, then revert the code that needs it |
-| Data was deleted or changed by mistake | `python backup.py list`, then `python backup.py restore <file>` (or an Aiven backup) |
-| Test or demo database is a mess | `python init_db.py --reset` (deletes everything, reloads the sample data) |
-
-### Monitoring and logs
-
-- **Health check:** `GET /api/health` returns `200` with `"status": "ok"` when the app and
-  database work, `"degraded"` when migrations are pending, and `503` when the database is
-  unreachable. Point an uptime monitor (e.g. UptimeRobot) at it.
-- **Logs:** every request (method, path, status, time), every error, every sign-in and every
-  failed sign-in (email and IP address, never the password) go to the console and
-  `logs/app.log`, which rotates at 1 MB and keeps 3 old files. Production logs warnings and
-  errors only (`LOG_LEVEL`).
-- **Audit trail:** each delivery is in `stock_receipts`; each sale is in `sales_orders`; every
-  table has `created_at` and `updated_at`.
-
-```
-2026-11-22 18:30:02,114 INFO    taphouse: Sign-in: manager@taphouse.co.za from 127.0.0.1
-2026-11-22 18:31:45,870 WARNING taphouse: Failed sign-in for 'manager@taphouse.co.za' from 10.0.0.7
-2026-11-22 18:40:12,005 ERROR   taphouse: Health check failed: (2003, "Can't connect to MySQL server")
-```
-
 ### Before every deployment
 
 1. `python -m unittest discover -s tests -p "test_*.py"`: all tests pass.
@@ -592,107 +464,7 @@ off the laptop (e.g. OneDrive): `backups/` is not committed to GitHub because it
 4. `GET /api/health` shows `"status": "ok"` and no pending migrations.
 5. Sign in, log one test sale, check the dashboard updates; if anything fails, follow the rollback plan.
 
-## Impact (Step 7)
-
-**These results are simulated, not measured in the bar.** `simulation.py` takes the 12 seeded
-TapHouse products (demand, its variation, costs and supplier lead times) and plays out one year
-(52 weeks) twice, with exactly the same customer demand and the same supplier delays. Only the
-ordering rule changes:
-
-| | Manual ordering (before) | DIDSS (after) |
-|---|---|---|
-| When stock is checked | Once a week (Monday stock count) | Every day (sales are logged in the app) |
-| When to order | Less than one week of average demand on hand or on order | Stock on hand + on order at or below the **reorder point** |
-| How much | Enough for two weeks of average demand | The **EOQ** from `supply_chain.py` |
-| Safety stock for busy days and late deliveries | None | Yes, at a 95% service level |
-
-In both, a product that runs out triggers an emergency order (one week of stock, next day, at
-three times the normal order cost) and customers who find it sold out buy something else.
-Demand follows the weekday pattern (Fridays and Saturdays busiest) and rises 38% on a home rugby
-Saturday every second week.
-
-```bash
-pip install matplotlib        # only needed for the charts
-python simulation.py          # writes docs/impact/; --seed 7 for another random year
-```
-
-### Before and after
-
-| KPI (one year, 12 products) | Manual (before) | DIDSS (after) | Change |
-|---|---|---|---|
-| Service level (share of demand served) | 97.7% | 100.0% | +2.3 points |
-| Stockout days (product-days) | 190 | 3 | −98% |
-| Units of demand lost | 712 | 12 | −98% |
-| Emergency orders | 166 | 0 | −100% |
-| Normal orders placed | 337 | 96 | −72% |
-| Ordering + emergency cost | R 98,110 | R 12,230 | −88% |
-| Holding cost | R 3,374 | R 12,314 | +265% |
-| **Total inventory cost** | **R 101,484** | **R 24,544** | **−76%** |
-| Average inventory value | R 16,914 | R 61,741 | +265% |
-
-![Four bar charts comparing manual ordering with DIDSS over one simulated year: stockout days fall from 190 to 3, emergency orders from 166 to 0 and total inventory cost from R 101,484 to R 24,544, while average inventory value rises from R 16,914 to R 61,741.](docs/impact/impact_kpis.png)
-
-*Figure 1. One simulated year with the same demand under both policies. DIDSS removes almost all
-stockouts and every emergency order and cuts total inventory cost by about three quarters, but it
-holds about 3.7 times as much stock on average.*
-
-![Line chart of Lager 500ml stock on hand over the first 16 weeks: under manual ordering stock repeatedly hits zero around rugby Saturdays; under DIDSS stock drops to the reorder point of 60 and is refilled with one large EOQ order before it runs out.](docs/impact/impact_lager_stock.png)
-
-*Figure 2. Lager 500ml, first 16 weeks. Manual ordering (orange) runs out several times, often
-just after rugby Saturdays (grey bars), because a weekly count cannot react mid-week. DIDSS (blue)
-reorders the day stock reaches the reorder point, so the safety stock covers the busy days.*
-
-**What this means for TapHouse.** The saving comes mainly from placing far fewer, larger orders
-and avoiding emergency orders, not from holding less stock. Holding more stock is the cost-optimal
-answer for the order and holding costs in the data (that is what the EOQ formula balances), but it
-ties up cash and cold-room space: Draught Keg 30L alone accounts for about R 15,500 of the average
-stock value, because its EOQ is 29 kegs at R 850 each. A sensitivity run in which no order covers
-more than 30 days of demand keeps the service level at 100% and still cuts total cost by 73%, with
-an average stock value of R 44,476 instead of R 61,741 (`docs/impact/impact_summary.csv`). That
-cap is the recommended next change if storage or cash is tight.
-
-**How reliable is this?** The same comparison with five other random years (seeds 1–5) gives a
-manual service level of 97.2–98.0% against 99.8–100% for DIDSS, 0–2 emergency orders against
-155–192, and a total cost of R 24,500–25,200 against R 97,500–107,700. The weak points are the
-assumptions: the manual rule is our model of a weekly stock count, not a measured TapHouse
-process, and the demand data is the seeded sample. With three months of real POS data uploaded
-through the CSV import, `simulation.py` can be re-run on TapHouse's own numbers.
-
-### Scalability
-
-TapHouse has 12 products today. `scale_test.py` builds a separate database with 1,000 and 5,000
-products (50 suppliers, 60 sales each, up to 300,036 sales) and times the busiest requests
-(median of 15 calls, laptop with local MySQL):
-
-| Request (median ms) | 12 products, 36 sales | 1,000 products, 60,036 sales | 5,000 products, 300,036 sales |
-|---|---|---|---|
-| `GET /api/products?status=REORDER` | 8 | 10 | 21 |
-| `GET /api/products?q=lager` | 8 | 10 | 19 |
-| `GET /api/sales` (one product, one month) | 7 | 9 | 11 |
-| `POST /api/sales` | 10 | 11 | 12 |
-| `GET /api/dashboard` | 10 | 34 | 149 |
-
-The first run showed the dashboard taking **511 ms** at 300,000 sales, because it summed every
-product's sales history to find the last 7 days and loaded every product to build the alerts.
-Step 7 fixed this: an index on `sale_date` (migration `003`), reading only recent sales, loading
-only products at or below their reorder point, and showing at most 20 stock alerts with a summary
-line for the rest. The dashboard now takes **149 ms** at 400 times today's data. Sales lookups
-use the `(product_id, sale_date)` index (checked with `EXPLAIN`), so their time barely changes.
-
-Growing further:
-
-- **More products:** the API pages every list (`?page=&size=`, at most 100 rows), but the
-  Inventory Master screen currently shows the first 100 products only; add page buttons before
-  going past 100 products.
-- **More branches:** add a `branches` table and a `branch_id` on products and sales; the model and
-  API stay the same, filtered by branch.
-- **More users:** gunicorn runs several worker processes (Step 6), each with its own database
-  connection per request, and sales lock only the product row they change (`SELECT ... FOR
-  UPDATE`), so two people logging sales of different products never wait for each other.
-- **Database:** Aiven can be resized without code changes; backups and migrations (Step 6) make
-  that move safe.
-
-## Quick check
+## Quick Test
 
 With fresh sample data the dashboard shows:
 
