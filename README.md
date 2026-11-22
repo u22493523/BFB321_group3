@@ -26,6 +26,7 @@ Stack: HTML/CSS/Bootstrap frontend · Flask backend · MySQL (local or Aiven) ·
 | Step 3: 3NF schema, seed data, PyMySQL connection, init script, live dashboard | Thejas Nirghin | *Step 3 (1/3)* to *Step 3 (3/3)* |
 | Step 3 fixes: model-calculated safety stock and reorder points, live alerts, README | Nehar Lalla | *Step 3 fix: …* |
 | Step 4: REST API blueprint, validation, error handling, logging, config, API tests | Nehar Lalla | *Step 4 (1/4)* to *Step 4 (4/4)* |
+| Step 5: manager login, CSV import, receive orders, scenario evaluation, live dashboard (fetch) | Thejas Nirghin | *Step 5 (1/4)* to *Step 5 (4/4)* |
 
 ## Project structure
 
@@ -35,6 +36,7 @@ Follows the class sample project ([bfb321/FLASK](https://github.com/bfb321/FLASK
 BFB321_group3/
 ├── app.py              creates the app, loads config, registers the API blueprint; page routes
 ├── api.py              Blueprint with every /api/... JSON endpoint (Step 4)
+├── auth.py             Blueprint for the manager login: /login, /logout, /api/auth/... (Step 5)
 ├── models.py           SQL queries, validation and business rules (no HTML, no routes)
 ├── supply_chain.py     Step 2 model: EOQ, safety stock, reorder point (no database code)
 ├── db.py               MySQL connection from .env, one connection per request, rollback helpers
@@ -45,16 +47,18 @@ BFB321_group3/
 ├── seed.sql            sample data (4 suppliers, 12 products, 36 sales, 1 manager)
 ├── requirements.txt    Python packages
 ├── .env.example        template for your .env file (no real passwords)
-├── templates/          index.html (dashboard)
-├── static/             css/main.css, images/
+├── templates/          index.html (dashboard), login.html
+├── static/             css/main.css, js/app.js (calls the API, redraws the page), images/
+├── data/               sample_pos_export.csv (a till export to try the CSV upload)
 ├── tests/              test_inventory.py (model), test_api.py (API), VScode_Testing.py
 └── logs/               app.log, created when the app runs (not committed)
 ```
 
 ```
-Browser / fetch ─▶ app.py ─▶ api.py (Blueprint, /api) ─▶ models.py (SQL + rules) ─▶ db.py ─▶ MySQL
-                                                              │
-                                                              └─▶ supply_chain.py (formulas)
+Browser (app.js, fetch) ─▶ app.py ─▶ auth.py (who is signed in)
+                                   ─▶ api.py (Blueprint, /api) ─▶ models.py (SQL + rules) ─▶ db.py ─▶ MySQL
+                                                                     │
+                                                                     └─▶ supply_chain.py (formulas)
 errors.py turns every failure into a clean JSON error and writes it to logs/app.log
 ```
 
@@ -228,9 +232,14 @@ Open <http://127.0.0.1:5000>. Stop the server with `Ctrl+C`.
 
 ### Test login
 
+The dashboard asks you to sign in first (<http://127.0.0.1:5000/login>):
+
 | Email | Password |
 |---|---|
 | `manager@taphouse.co.za` | `TapHouse2026!` |
+
+The password is stored as a Werkzeug hash in the `users` table, never as plain text. This is a
+test account for markers; change it before using the app for real.
 
 ### Run the tests
 
@@ -243,6 +252,52 @@ calls every endpoint and checks the result in MySQL. It uses a separate database
 (`TEST_DB_NAME`, default `taphouse_didss_test`) that it creates, wipes and rebuilds itself, so your
 real data is never touched; your MySQL user needs permission to create it. If MySQL is not
 running, the API tests are skipped and the formula tests still run.
+
+## Using the dashboard (Step 5)
+
+After signing in, every action calls the REST API with `fetch()` (`static/js/app.js`) and the KPI
+cards, reorder table, alerts, chart and product list are redrawn from the API's answer, so the
+page never reloads. Success and error messages appear under the form; fields the API rejected are
+outlined in red.
+
+### Three end-to-end flows
+
+| # | Flow | Screen → API → database | What changes on screen |
+|---|---|---|---|
+| 1 | **A sale pushes a product below its reorder point** | Data Management → *Log Sales* → `POST /api/sales` → one transaction inserts the sale and reduces stock | Stock and status in the message; inventory value KPI drops; the product appears in *Products Nearing Reorder Point* with the EOQ to order; a new alert; the weekday chart rises |
+| 2 | **A supplier's lead time changes and the model reacts** | Data Management → *Update Supplier Lead Time* → `PATCH /api/suppliers/<id>` → `supply_chain.recommend()` recalculates safety stock and reorder point for every product from that supplier | The message lists each product's old and new reorder point; products that are now below it move into the reorder table |
+| 3 | **Upload the till's CSV, then receive the order** | *Upload Historical POS Data* → `POST /api/sales/import` (all rows saved or none) → dashboard → *Receive order* → `POST /api/products/<id>/receive` | Imported count; KPIs and reorder table update; after *Receive order* the product's stock rises by the EOQ and it leaves the reorder table |
+
+Also on the page:
+
+- **Inventory Master → + Add Product / Edit** (`POST` and `PATCH /api/products`). The model sets
+  safety stock and reorder point from the demand figures and the supplier's lead time.
+- **Scenario Evaluation** (`GET /api/products/<id>/recommendation`). Pick a product, a demand
+  change (for example +38% for a home rugby match), a lead time and a service level (95–99.9%);
+  the page compares the saved policy with the scenario. Nothing is saved.
+
+Try it with fresh sample data (`python init_db.py --reset`):
+
+1. Log a sale of **100 Cider 330ml**: stock 112 → 12, status **URGENT** (12 ≤ safety stock 19),
+   inventory value R 17,856.80 → R 16,056.80, and Cider joins the reorder table with an order
+   quantity of 616.
+2. Change **Beverage Co** to **7 days**: Tonic Water's reorder point 36 → 55, Soda Water 48 → 73.
+3. Upload `data/sample_pos_export.csv`: 5 sales imported; Lager 48 → 33. Click **Receive order**
+   on Lager: stock 33 → 565 and the row disappears.
+
+### CSV format
+
+First line `sale_date,sku,quantity_sold,unit_price`, then one sale per line. `unit_price` may be
+blank (the product's cost is used). Dates are `YYYY-MM-DD` and cannot be in the future. Every row
+is checked first: if any row has an unknown SKU, a bad date or sells more than is in stock,
+**nothing is imported** and each problem is listed by line number. At most 500 rows and 1 MB per
+file.
+
+```
+sale_date,sku,quantity_sold,unit_price
+2026-11-19,BEV-001,6,22.00
+2026-11-19,BEV-002,10,
+```
 
 ## REST API (Step 4)
 
@@ -270,6 +325,23 @@ endpoint.
 | 13 | POST | `/api/sales` | Log a sale and reduce stock in one transaction | 201 |
 | 14 | GET | `/api/sales/<id>` | One sale | 200 |
 | 15 | GET | `/api/dashboard` | KPI cards, stock status counts, demand by weekday and alerts | 200 |
+| 16 | POST | `/api/products/<id>/receive` | A delivery arrived: add `{"quantity": 532}` to stock (Step 5) | 200 |
+| 17 | POST | `/api/sales/import` | Upload a CSV of sales (form field `file`); all rows saved or none (Step 5) | 201 |
+| 18 | POST | `/api/auth/login` | Sign in with `{"email", "password"}`; returns a session cookie (Step 5) | 200 |
+| 19 | POST | `/api/auth/logout` | Sign out (Step 5) | 200 |
+
+**Signing in (Step 5).** Reading (`GET`) is open so the API is easy to test. Creating or changing
+data (`POST`, `PATCH`) needs the manager to be signed in, otherwise `401`. With curl, sign in once
+and keep the cookie:
+
+```bash
+curl -c cookies.txt -H "Content-Type: application/json" \
+     -d '{"email": "manager@taphouse.co.za", "password": "TapHouse2026!"}' \
+     http://127.0.0.1:5000/api/auth/login
+curl -b cookies.txt -H "Content-Type: application/json" -d '{"product_id": 3, "quantity_sold": 4}' \
+     http://127.0.0.1:5000/api/sales
+curl -b cookies.txt -F "file=@data/sample_pos_export.csv" http://127.0.0.1:5000/api/sales/import
+```
 
 `POST` responses return `201 Created` with a `Location` header pointing at the new record.
 
@@ -286,6 +358,8 @@ endpoint.
 | `/api/sales` | `product_id` | Sales of one product |
 | | `from`, `to` | Dates `YYYY-MM-DD`; `to` must not be before `from` |
 | `/recommendation`, `/recalculate` | `service_level` | 0.95 to 0.999 (default `SERVICE_LEVEL` in `.env`) |
+| `/recommendation` | `demand_change` | Scenario: percent change in demand, −90 to 300 (Step 5) |
+| | `lead_time_days` | Scenario: a different supplier lead time, 1 to 365 (Step 5) |
 
 ### Response shape
 
@@ -317,10 +391,10 @@ Send JSON (`Content-Type: application/json`). Normal HTML form posts are accepte
 | `PATCH /api/suppliers/<id>` | at least one field | any field above |
 | `POST /api/sales` | `product_id`, `quantity_sold` (≥ 1) | `unit_price` (default: the product's latest selling price), `sale_date` (`YYYY-MM-DD`, not in the future; default now) |
 
-Example: log a sale of 4 bottles of House Red Wine.
+Example: log a sale of 4 bottles of House Red Wine (sign in first and keep `cookies.txt`, see *Signing in* above).
 
 ```bash
-curl -X POST http://127.0.0.1:5000/api/sales \
+curl -b cookies.txt -X POST http://127.0.0.1:5000/api/sales \
      -H "Content-Type: application/json" \
      -d '{"product_id": 3, "quantity_sold": 4, "sale_date": "2026-11-20"}'
 ```
@@ -333,7 +407,7 @@ curl -X POST http://127.0.0.1:5000/api/sales \
 Example: change a supplier's lead time.
 
 ```bash
-curl -X PATCH http://127.0.0.1:5000/api/suppliers/4 \
+curl -b cookies.txt -X PATCH http://127.0.0.1:5000/api/suppliers/4 \
      -H "Content-Type: application/json" -d '{"lead_time_days": 7}'
 ```
 
@@ -346,10 +420,12 @@ product from that supplier.
 |---|---|
 | 200 | Read or update succeeded |
 | 201 | Record created |
-| 400 | Missing field, wrong type, out-of-range value, bad JSON or bad query parameter |
+| 400 | Missing field, wrong type, out-of-range value, bad JSON or bad query parameter, or a CSV with bad rows |
+| 401 | Not signed in (writes only), or wrong email or password |
 | 404 | Record or URL not found |
 | 405 | Wrong method for the URL (e.g. `DELETE`) |
 | 409 | Duplicate SKU or supplier name, or a sale larger than the stock on hand |
+| 413 | Uploaded file larger than 1 MB |
 | 500 | Unexpected server error: a generic message only, never a stack trace |
 | 503 | MySQL not reachable |
 
