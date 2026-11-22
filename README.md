@@ -15,7 +15,7 @@ Stack: HTML/CSS/Bootstrap frontend · Flask backend · MySQL (local or Aiven) ·
 | Member | Student number | GitHub username |
 |---|---|---|
 | Thejas Nirghin | u22493523 | [u22493523](https://github.com/u22493523) |
-| Nehar Lalla | u23524848 | [NEHAR-GITHUB-USERNAME](https://github.com/NEHAR-GITHUB-USERNAME) |
+| Nehar Lalla | u23524848 | [u23524848](https://github.com/u23524848) |
 
 ### Task allocation
 
