@@ -27,6 +27,7 @@ Stack: HTML/CSS/Bootstrap frontend · Flask backend · MySQL (local or Aiven) ·
 | Step 3 fixes: model-calculated safety stock and reorder points, live alerts, README | Nehar Lalla | *Step 3 fix: …* |
 | Step 4: REST API blueprint, validation, error handling, logging, config, API tests | Nehar Lalla | *Step 4 (1/4)* to *Step 4 (4/4)* |
 | Step 5: manager login, CSV import, receive orders, scenario evaluation, live dashboard (fetch) | Thejas Nirghin | *Step 5 (1/4)* to *Step 5 (4/4)* |
+| Step 6: migrations with rollback, backup and restore, health check, audit trail, production setup | Nehar Lalla | *Step 6 (1/4)* to *Step 6 (4/4)* |
 
 ## Project structure
 
@@ -43,7 +44,10 @@ BFB321_group3/
 ├── errors.py           error handlers for every status code, and logging setup
 ├── config.py           development, testing and production settings
 ├── init_db.py          creates the tables, loads the sample data, runs the model
-├── schema.sql          CREATE TABLE statements
+├── migrate.py          applies / rolls back database changes in migrations/ (Step 6)
+├── backup.py           backs up and restores the database to backups/ (Step 6)
+├── migrations/         numbered .up.sql / .down.sql pairs, e.g. 002_stock_receipts
+├── schema.sql          CREATE TABLE statements (full current structure for a new database)
 ├── seed.sql            sample data (4 suppliers, 12 products, 36 sales, 1 manager)
 ├── requirements.txt    Python packages
 ├── .env.example        template for your .env file (no real passwords)
@@ -51,7 +55,8 @@ BFB321_group3/
 ├── static/             css/main.css, js/app.js (calls the API, redraws the page), images/
 ├── data/               sample_pos_export.csv (a till export to try the CSV upload)
 ├── tests/              test_inventory.py (model), test_api.py (API), VScode_Testing.py
-└── logs/               app.log, created when the app runs (not committed)
+├── logs/               app.log, created when the app runs (not committed)
+└── backups/            .sql backups made by backup.py and migrate.py (not committed)
 ```
 
 ```
@@ -70,6 +75,8 @@ errors.py turns every failure into a clean JSON error and writes it to logs/app.
 erDiagram
     suppliers ||--o{ products : "supplies"
     products  ||--o{ sales_orders : "recorded_in"
+    products  ||--o{ stock_receipts : "received_as"
+    users     |o--o{ stock_receipts : "received_by"
 
     suppliers {
         int       id PK
@@ -111,6 +118,16 @@ erDiagram
         timestamp updated_at
     }
 
+    stock_receipts {
+        int       id PK
+        int       product_id FK "INDEX (product_id, received_at)"
+        int       quantity
+        int       received_by FK "NULL if the user is removed"
+        datetime  received_at
+        timestamp created_at
+        timestamp updated_at
+    }
+
     users {
         int       id PK
         varchar   first_name
@@ -124,7 +141,9 @@ erDiagram
 
 - **Relationships:** one supplier supplies many products (`products.supplier_id` → `suppliers.id`),
   and one product appears in many sales (`sales_orders.product_id` → `products.id`). Both are
-  one-to-many, so no link table is needed. `users` is a standalone table for manager logins.
+  one-to-many, so no link table is needed. `users` holds manager logins. Step 6 added
+  `stock_receipts` (migration 002): each delivery belongs to one product and records which user
+  received it (`ON DELETE SET NULL`, so removing a user keeps the history).
 - **3NF:** supplier details (lead time, email) are stored once in `suppliers`, not repeated in
   every product row. `sales_orders.unit_price` copies the price at the time of sale so later price
   changes never rewrite history.
@@ -135,7 +154,7 @@ erDiagram
   `updated_at` changes automatically (`ON UPDATE CURRENT_TIMESTAMP`).
 - **Indexes:** `idx_suppliers_lead_time (lead_time_days)`, `idx_products_category_stock (category,
   current_stock)`, `idx_products_supplier_rop (supplier_id, reorder_point)` and
-  `idx_sales_product_date (product_id, sale_date)`.
+  `idx_sales_product_date (product_id, sale_date)` and `idx_receipts_product_date (product_id, received_at)`.
 
 ### How the supply chain model sets safety stock and reorder points
 
@@ -248,10 +267,12 @@ python -m unittest discover -s tests -p "test_*.py"
 ```
 
 `test_inventory.py` checks the supply chain formulas against hand calculations. `test_api.py`
-calls every endpoint and checks the result in MySQL. It uses a separate database
-(`TEST_DB_NAME`, default `taphouse_didss_test`) that it creates, wipes and rebuilds itself, so your
-real data is never touched; your MySQL user needs permission to create it. If MySQL is not
-running, the API tests are skipped and the formula tests still run.
+calls every endpoint and checks the result in MySQL. `test_operations.py` (Step 6) checks
+migrations up and down, backup and restore, the health check and the production settings.
+The API and operations tests use a separate database (`TEST_DB_NAME`, default
+`taphouse_didss_test`) that they create, wipe and rebuild themselves, so your real data is never
+touched; your MySQL user needs permission to create it. If MySQL is not running, those tests are
+skipped and the formula tests still run.
 
 ## Using the dashboard (Step 5)
 
@@ -329,6 +350,8 @@ endpoint.
 | 17 | POST | `/api/sales/import` | Upload a CSV of sales (form field `file`); all rows saved or none (Step 5) | 201 |
 | 18 | POST | `/api/auth/login` | Sign in with `{"email", "password"}`; returns a session cookie (Step 5) | 200 |
 | 19 | POST | `/api/auth/logout` | Sign out (Step 5) | 200 |
+| 20 | GET | `/api/products/<id>/receipts` | Deliveries received for a product: quantity, who, when (Step 6) | 200 |
+| 21 | GET | `/api/health` | App, database and migration status for monitoring (Step 6) | 200 / 503 |
 
 **Signing in (Step 5).** Reading (`GET`) is open so the API is easy to test. Creating or changing
 data (`POST`, `PATCH`) needs the manager to be signed in, otherwise `401`. With curl, sign in once
@@ -453,6 +476,116 @@ unexpected errors include the full traceback in the log (never in the response):
 2026-11-22 10:24:17,050 INFO    taphouse: POST /api/sales -> 409 Only 20 units of House Red Wine are in stock.
 ```
 
+## Deployment and operations (Step 6)
+
+### Environments
+
+| | Development | Testing | Production |
+|---|---|---|---|
+| Set with | `APP_ENV=development` | set by the tests | `APP_ENV=production` |
+| Run with | `python app.py` | `python -m unittest ...` | gunicorn (macOS/Linux) or waitress (Windows) |
+| Database | `DB_NAME` (local MySQL or Aiven) | `TEST_DB_NAME`, rebuilt for every test | `DB_NAME` on Aiven, with `DB_SSL_CA` |
+| Debug / error pages | on | off | off, JSON errors only, no stack traces |
+| Cookies | normal | normal | `Secure` (HTTPS only), `HttpOnly`, `SameSite=Lax` |
+| `SECRET_KEY` | any | any | **required**: 32+ random characters, or the app refuses to start |
+
+### Run in production
+
+```bash
+# 1. In .env: APP_ENV=production, the Aiven DB_* values, DB_SSL_CA=ca.pem and a real secret:
+python -c "import secrets; print(secrets.token_hex(32))"     # paste the result as SECRET_KEY
+
+# 2. Install, then bring the database up to date (takes a backup first)
+pip install -r requirements.txt
+python migrate.py up
+
+# 3. Start the server (4 worker processes)
+gunicorn -w 4 -b 0.0.0.0:8000 app:app                     # macOS / Linux
+waitress-serve --port=8000 app:app                        # Windows
+
+# 4. Check it
+curl http://127.0.0.1:8000/api/health
+```
+
+Put the app behind HTTPS (for example the hosting platform's proxy): in production the login
+cookie is only sent over HTTPS.
+
+### Database changes: migrations
+
+`schema.sql` builds a **new** database. A database that already holds real sales must never be
+reset, so every change to the tables is also written as a numbered migration in `migrations/`,
+each with an `up` file (apply) and a `down` file (undo). The table `schema_migrations` records
+which ones this database has.
+
+| Migration | Change | Rollback |
+|---|---|---|
+| `001_inventory_policy_columns` | Adds `products.safety_stock` and `users.updated_at` (databases built before the Step 3 fix) | Drops both columns |
+| `002_stock_receipts` | Adds the `stock_receipts` table: every delivery, who received it and when | Drops the table (stock levels are unchanged) |
+
+```bash
+python migrate.py status      # 2 applied, 0 pending
+python migrate.py up          # backs up, then applies anything pending, oldest first
+python migrate.py down        # backs up, then undoes the most recent migration
+python migrate.py baseline    # a database built by init_db.py already has them all: just record them
+```
+
+To add a change: write `003_short_name.up.sql` and `003_short_name.down.sql`, add the same change
+to `schema.sql`, test `up`, `down` and `up` again on the test database, then commit. `migrate.py`
+refuses a migration without a `.down.sql`.
+
+### Backup and restore
+
+```bash
+python backup.py                  # backups/taphouse_didss-20261122-183000.sql
+python backup.py list             # newest first
+python backup.py restore latest   # asks you to type YES, then replaces every table
+```
+
+A backup is a plain `.sql` file with every table's structure and rows, made with PyMySQL (no
+`mysqldump` needed), so it also restores with `mysql taphouse_didss < backups/<file>.sql`.
+`migrate.py up` and `down` make one automatically before changing anything. Restoring makes the
+database exactly match the backup, including dropping tables created after it.
+
+On Aiven, the service also keeps its own daily backups (Service → Backups), which can be restored
+from the Aiven console. Take a `backup.py` backup before every deployment as well, and keep a copy
+off the laptop (e.g. OneDrive): `backups/` is not committed to GitHub because it contains data.
+
+### Rollback plan
+
+| What went wrong | Do this |
+|---|---|
+| New code is broken, database is fine | On GitHub, open the bad commit → **Revert**, or `git revert <commit>`; redeploy; check `/api/health` |
+| A migration failed half-way | `python backup.py restore latest` (the backup `migrate.py` made just before), fix the `.up.sql`, run `up` again |
+| A migration worked but the change is wrong | `python migrate.py down`, then revert the code that needs it |
+| Data was deleted or changed by mistake | `python backup.py list`, then `python backup.py restore <file>` (or an Aiven backup) |
+| Test or demo database is a mess | `python init_db.py --reset` (deletes everything, reloads the sample data) |
+
+### Monitoring and logs
+
+- **Health check:** `GET /api/health` returns `200` with `"status": "ok"` when the app and
+  database work, `"degraded"` when migrations are pending, and `503` when the database is
+  unreachable. Point an uptime monitor (e.g. UptimeRobot) at it.
+- **Logs:** every request (method, path, status, time), every error, every sign-in and every
+  failed sign-in (email and IP address, never the password) go to the console and
+  `logs/app.log`, which rotates at 1 MB and keeps 3 old files. Production logs warnings and
+  errors only (`LOG_LEVEL`).
+- **Audit trail:** each delivery is in `stock_receipts`; each sale is in `sales_orders`; every
+  table has `created_at` and `updated_at`.
+
+```
+2026-11-22 18:30:02,114 INFO    taphouse: Sign-in: manager@taphouse.co.za from 127.0.0.1
+2026-11-22 18:31:45,870 WARNING taphouse: Failed sign-in for 'manager@taphouse.co.za' from 10.0.0.7
+2026-11-22 18:40:12,005 ERROR   taphouse: Health check failed: (2003, "Can't connect to MySQL server")
+```
+
+### Before every deployment
+
+1. `python -m unittest discover -s tests -p "test_*.py"`: all tests pass.
+2. `python backup.py` on the live database.
+3. Deploy the code, then `python migrate.py up`.
+4. `GET /api/health` shows `"status": "ok"` and no pending migrations.
+5. Sign in, log one test sale, check the dashboard updates; if anything fails, follow the rollback plan.
+
 ## Quick check
 
 With fresh sample data the dashboard shows:
@@ -470,4 +603,7 @@ With fresh sample data the dashboard shows:
 | `Access denied for user` | `DB_USER` or `DB_PASSWORD` is wrong |
 | `Unknown database` | Create the `taphouse_didss` database first, or fix `DB_NAME` |
 | `No module named 'flask'` / `'pymysql'` | Activate the virtual environment, then `pip install -r requirements.txt` |
-| `Table doesn't exist` after editing `schema.sql` | Run `python init_db.py --reset` |
+| `Table doesn't exist` after editing `schema.sql` | Run `python init_db.py --reset` (sample data), or add a migration and run `python migrate.py up` (real data) |
+| `/api/health` says `degraded` | Migrations are pending: `python migrate.py up` |
+| `Production needs a real SECRET_KEY` | Put a 64-character random `SECRET_KEY` in `.env` (command above) |
+| Can't stay signed in in production over `http://` | The production cookie is HTTPS-only; use HTTPS, or `APP_ENV=development` locally |
