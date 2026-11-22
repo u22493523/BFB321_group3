@@ -11,3 +11,6 @@ __pycache__/
 # OS / IDE artifacts
 .DS_Store
 .vscode/
+
+# Application logs
+logs/
